@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Spotify Player</title>
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script defer src="player.js"></script>
+</head>
+<body>
+  <h1>🎵 Spotify Player</h1>
+
+  <div id="userPlaylists">
+    <h2>Your Playlists</h2>
+    <ul id="playlistList"></ul>
+  </div>
+
+  <div id="searchSection">
+    <h2>Search</h2>
+    <input type="text" id="searchInput" placeholder="Search for tracks or playlists">
+    <button id="searchBtn">Search</button>
+    <ul id="searchResults"></ul>
+  </div>
+
+  <div id="playerControls">
+    <button id="playBtn">▶️ Play</button>
+    <button id="pauseBtn">⏸️ Pause</button>
+    <button id="nextBtn">⏭️ Next</button>
+    <button id="prevBtn">⏮️ Previous</button>
+    <button id="shuffleBtn">🔀 Shuffle</button>
+  </div>
+
+  <div>
+    <button id="logoutBtn">Logout</button>
+  </div>
+</body>
+</html>
