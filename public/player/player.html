@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎵 Spotify Player</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="player.css">
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script defer src="player.js"></script>
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <h1>🎵 Spotify Player</h1>
+      <button id="logoutBtn" class="btn-logout">Logout</button>
+    </header>
+
+    <section class="current-track">
+      <div class="track-info">
+        <img id="trackImage" src="" alt="Album Art">
+        <div>
+          <h2 id="trackName">No song playing</h2>
+          <p id="trackArtist"></p>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="prevBtn" class="control-btn"><i class="fas fa-backward"></i></button>
+        <button id="playPauseBtn" class="control-btn"><i class="fas fa-play"></i></button>
+        <button id="nextBtn" class="control-btn"><i class="fas fa-forward"></i></button>
+        <button id="shuffleBtn" class="control-btn"><i class="fas fa-random"></i></button>
+      </div>
+    </section>
+
+    <section class="search">
+      <input type="text" id="searchInput" placeholder="Search for tracks or playlists...">
+      <button id="searchBtn" class="btn-search">Search</button>
+      <div id="loader" class="loader" hidden></div>
+      <ul id="searchResults"></ul>
+    </section>
+
+    <section class="playlists">
+      <h2>Your Playlists</h2>
+      <ul id="playlistList"></ul>
+    </section>
+
+  </div>
+</body>
+
+</html>
