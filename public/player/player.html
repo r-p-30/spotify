@@ -21,7 +21,7 @@
 
     <!-- GLOBAL SEARCH BAR -->
     <section class="search">
-      <input type="text" id="searchInput" placeholder="Search for tracks or playlists...">
+      <input type="text" id="searchInput" placeholder="Search for tracks...">
       <button id="searchBtn" class="btn-search">Search</button>
       <div id="loader" class="loader" hidden></div>
     </section>
@@ -38,6 +38,13 @@
           <h2 id="trackName">No song playing</h2>
           <p id="trackArtist"></p>
           <img id="trackImage" src="" alt="Album Art">
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-area">
+          <span id="currentTime">0:00</span>
+          <input type="range" id="progressBar" min="0" max="100" value="0">
+          <span id="totalDuration">0:00</span>
         </div>
 
         <!-- Navigation controls -->

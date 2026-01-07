@@ -1,6 +1,4 @@
-/*********************************
- * GLOBAL STATE
- *********************************/
+// GLOBAL STATE
 let player;
 let deviceId;
 let isPlaying = false;
@@ -13,10 +11,14 @@ let selectedPlaylist = {
 };
 
 let selectedPlaylistName = "Liked Songs";
+let nextTracksUrl = null;
+let isLoadingMore = false;
+let progressInterval;
+let isDraggingProgress = false;
+let currentTrackUri = null;
 
-/*********************************
- * AUTH
- *********************************/
+
+// AUTH
 let token = localStorage.getItem("access_token");
 
 (async () => {
@@ -38,17 +40,13 @@ let token = localStorage.getItem("access_token");
   }
 })();
 
-/*********************************
- * LOGOUT
- *********************************/
+// LOGOUT
 document.getElementById("logoutBtn")?.addEventListener("click", () => {
   localStorage.clear();
   window.location.href = "/";
 });
 
-/*********************************
- * SPOTIFY SDK INIT (CRITICAL FIX)
- *********************************/
+// SPOTIFY SDK INIT
 window.onSpotifyWebPlaybackSDKReady = function () {
   player = new Spotify.Player({
     name: "Local Web Player",
@@ -70,7 +68,15 @@ window.onSpotifyWebPlaybackSDKReady = function () {
 
     isPlaying = !state.paused;
     updatePlayPauseButton(isPlaying);
+    
+    // Update highlight
+    if (state.track_window.current_track) {
+      currentTrackUri = state.track_window.current_track.uri;
+      highlightCurrentTrack();
+    }
+
     updateCurrentTrackInfo(state.track_window.current_track);
+    updateProgressState(state);
   });
 
   player.connect();
@@ -91,9 +97,7 @@ window.onload = async () => {
   }
 };
 
-/*********************************
- * CONTROLS
- *********************************/
+// CONTROLS
 const playPauseBtn = document.getElementById("playPauseBtn");
 
 // GLOBAL SEARCH
@@ -167,9 +171,7 @@ playPauseBtn.onclick = () => {
   }
 };
 
-/*********************************
- * PLAYBACK
- *********************************/
+// PLAYBACK
 async function playContext({ contextUri, uris, offset = 0 }) {
   if (!deviceId) return;
 
@@ -260,9 +262,7 @@ function resumeAfterSkip() {
   }, 200);
 }
 
-/*********************************
- * SHUFFLE
- *********************************/
+// SHUFFLE
 async function toggleShuffle(override) {
   const newState = !isShuffle;
 
@@ -302,9 +302,7 @@ async function syncShuffleState() {
   }
 }
 
-/*********************************
- * UI
- *********************************/
+// UI
 function updatePlayPauseButton(state) {
   playPauseBtn.querySelector("i").className = state
     ? "fas fa-pause"
@@ -329,15 +327,14 @@ function updateCurrentTrackInfo(track) {
   trackImageEl.src = track.album.images[0]?.url || "";
 }
 
-/*********************************
- * LIKED SONGS
- *********************************/
+// LIKED SONGS
 async function loadLikedSongs() {
   selectedPlaylistName = "Liked Songs";
 
   const res = await fetchWithAuth("https://api.spotify.com/v1/me/tracks?limit=50");
 
   const data = await res.json();
+  nextTracksUrl = data.next;
 
   selectedPlaylist = {
     name: "Liked Songs",
@@ -347,11 +344,52 @@ async function loadLikedSongs() {
 
   renderSelectedPlaylist();
   renderPlaylistSidebar();
+  
+  // Reset scroll to top
+  document.querySelector(".selected-playlist").scrollTop = 0;
 }
 
-/*********************************
- * PLAYLISTS
- *********************************/
+// Infinite Scroll Listener
+const playlistContainer = document.querySelector(".selected-playlist");
+if (playlistContainer) {
+  playlistContainer.addEventListener("scroll", (e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.target;
+    if (scrollTop + clientHeight >= scrollHeight - 50) {
+      loadMoreTracks();
+    }
+  });
+} else {
+  console.error("Could not find .selected-playlist element to attach scroll listener");
+}
+
+async function loadMoreTracks() {
+  if (!nextTracksUrl) {
+    return;
+  }
+  if (isLoadingMore) {
+    return;
+  }
+  
+  isLoadingMore = true;
+
+  try {
+    const res = await fetchWithAuth(nextTracksUrl);
+    const data = await res.json();
+    
+    nextTracksUrl = data.next;
+    const newTracks = data.items.map(i => i.track);
+    
+    selectedPlaylist.tracks.push(...newTracks);
+    
+    renderTrackList(newTracks, true); // Append mode
+  } catch (err) {
+    console.error("Failed to load more songs:", err);
+  } finally {
+    isLoadingMore = false;
+  }
+}
+
+// PLAYLISTS
 let cachedPlaylists = [];
 
 async function loadUserPlaylists() {
@@ -367,31 +405,73 @@ function renderPlaylistSidebar() {
   const ul = document.getElementById("playlistList");
   ul.innerHTML = "";
 
+  // Render "Liked Songs" Card
   if (selectedPlaylistName !== "Liked Songs") {
-    const li = document.createElement("li");
-    li.textContent = "Liked Songs";
+    const li = createPlaylistCard({
+      name: "Liked Songs",
+      images: [] // No image, will handle in createPlaylistCard
+    }, true);
     li.onclick = loadLikedSongs;
     ul.appendChild(li);
   }
 
+  // Render User Playlists
   cachedPlaylists.forEach(pl => {
     if (pl.name === selectedPlaylistName) return;
 
-    const li = document.createElement("li");
-    li.textContent = pl.name;
+    const li = createPlaylistCard(pl);
     li.onclick = () => selectPlaylist(pl);
     ul.appendChild(li);
   });
+}
+
+function createPlaylistCard(pl, isLikedSongs = false) {
+  const li = document.createElement("li");
+  li.className = "playlist-card";
+  li.title = pl.name; // Tooltip for full name
+
+  const imgDiv = document.createElement("div");
+  imgDiv.className = "playlist-card-img";
+  
+  if (isLikedSongs) {
+    imgDiv.innerHTML = '<i class="fas fa-heart" style="font-size: 2rem; color: #fff;"></i>';
+    imgDiv.style.background = "linear-gradient(135deg, #450af5, #c4efd9)";
+    imgDiv.style.display = "flex";
+    imgDiv.style.alignItems = "center";
+    imgDiv.style.justifyContent = "center";
+  } else if (pl.images && pl.images.length > 0) {
+    const img = document.createElement("img");
+    img.src = pl.images[0].url;
+    img.alt = pl.name;
+    imgDiv.appendChild(img);
+  } else {
+    // Fallback for no image
+    imgDiv.innerHTML = '<i class="fas fa-music" style="font-size: 2rem; color: #fff;"></i>';
+    imgDiv.style.background = "#333";
+    imgDiv.style.display = "flex";
+    imgDiv.style.alignItems = "center";
+    imgDiv.style.justifyContent = "center";
+  }
+
+  const nameDiv = document.createElement("div");
+  nameDiv.className = "playlist-name";
+  nameDiv.textContent = pl.name;
+
+  li.appendChild(imgDiv);
+  li.appendChild(nameDiv);
+
+  return li;
 }
 
 async function selectPlaylist(pl) {
   selectedPlaylistName = pl.name;
 
   const res = await fetchWithAuth(
-    `https://api.spotify.com/v1/playlists/${pl.id}/tracks`
+    `https://api.spotify.com/v1/playlists/${pl.id}/tracks?limit=50`
   );
 
   const data = await res.json();
+  nextTracksUrl = data.next;
 
   selectedPlaylist = {
     name: pl.name,
@@ -401,23 +481,25 @@ async function selectPlaylist(pl) {
 
   renderSelectedPlaylist();
   renderPlaylistSidebar();
+  
+  // Reset scroll to top
+  document.querySelector(".selected-playlist").scrollTop = 0;
 }
 
-/*********************************
- * SELECTED PLAYLIST VIEW
- *********************************/
+// SELECTED PLAYLIST VIEW
 function renderSelectedPlaylist() {
   document.getElementById("selectedPlaylistName").textContent = selectedPlaylist.name;
   renderTrackList(selectedPlaylist.tracks);
 }
 
-function renderTrackList(tracks) {
+function renderTrackList(tracks, append = false) {
   const ul = document.getElementById("selectedPlaylistTracks");
-  ul.innerHTML = "";
+  if (!append) ul.innerHTML = "";
 
   tracks.forEach((track, idx) => {
     const li = document.createElement("li");
     li.textContent = `${track.name} - ${track.artists.map(a => a.name).join(", ")}`;
+    li.dataset.uri = track.uri;
 
     li.onclick = () => {
       // Find original index in full playlist to play correct track
@@ -436,6 +518,19 @@ function renderTrackList(tracks) {
     };
 
     ul.appendChild(li);
+  });
+
+  if (currentTrackUri) highlightCurrentTrack();
+}
+
+function highlightCurrentTrack() {
+  const lis = document.querySelectorAll("#selectedPlaylistTracks li");
+  lis.forEach(li => {
+    if (li.dataset.uri === currentTrackUri) {
+        li.classList.add("playing");
+    } else {
+        li.classList.remove("playing");
+    }
   });
 }
 
@@ -456,3 +551,65 @@ async function fetchWithAuth(url, options = {}) {
   }
   return res;
 }
+
+function updateProgressState(state) {
+  if (isDraggingProgress) return;
+
+  const { position, duration } = state;
+  updateProgressUI(position, duration);
+
+  clearInterval(progressInterval);
+  
+  if (!state.paused) {
+    let currentPosition = position;
+    progressInterval = setInterval(() => {
+      currentPosition += 1000;
+      if (currentPosition > duration) {
+          currentPosition = duration;
+          clearInterval(progressInterval);
+      }
+      if (!isDraggingProgress) {
+        updateProgressUI(currentPosition, duration);
+      }
+    }, 1000);
+  }
+}
+
+function updateProgressUI(position, duration) {
+  const progressBar = document.getElementById("progressBar");
+  const currentTimeEl = document.getElementById("currentTime");
+  const totalDurationEl = document.getElementById("totalDuration");
+
+  const progressPercent = (position / duration) * 100 || 0;
+  progressBar.value = progressPercent;
+  progressBar.style.background = `linear-gradient(to right, #fff ${progressPercent}%, rgba(255,255,255,0.2) ${progressPercent}%)`;
+  
+  currentTimeEl.textContent = formatTime(position);
+  totalDurationEl.textContent = formatTime(duration);
+}
+
+function formatTime(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+// Progress Bar Interactions
+const progressBar = document.getElementById("progressBar");
+progressBar.addEventListener("input", () => {
+  isDraggingProgress = true;
+});
+
+progressBar.addEventListener("change", async (e) => {
+  isDraggingProgress = false;
+  const seekPercent = e.target.value;
+  
+  const state = await player.getCurrentState();
+  if (state) {
+    const duration = state.duration;
+    const seekPos = (seekPercent / 100) * duration;
+    player.seek(seekPos);
+    updateProgressUI(seekPos, duration);
+  }
+});
