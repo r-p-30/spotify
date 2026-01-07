@@ -1,36 +1,8 @@
-const clientId = "244de89a12e446b99a60bdd0892d75ff"; // Spotify client ID
-const redirectUri = "http://127.0.0.1:3000/callback";
-const scopes = [
-  "user-read-playback-state",
-  "user-modify-playback-state",
-  "streaming",
-  "playlist-read-private",
-  "playlist-read-collaborative",
-  "user-library-read"
-].join(" ");
+// PKCE HELPERS
 
-// --- LOGIN ---
-document.getElementById("loginBtn")?.addEventListener("click", async () => {
-  const codeVerifier = generateRandomString(128);
-  localStorage.setItem("code_verifier", codeVerifier);
-
-  const codeChallenge = await generateCodeChallenge(codeVerifier);
-
-  const authUrl = new URL("https://accounts.spotify.com/authorize");
-  authUrl.searchParams.append("client_id", clientId);
-  authUrl.searchParams.append("response_type", "code");
-  authUrl.searchParams.append("redirect_uri", redirectUri);
-  authUrl.searchParams.append("scope", scopes);
-  authUrl.searchParams.append("code_challenge_method", "S256");
-  authUrl.searchParams.append("code_challenge", codeChallenge);
-
-  window.location.href = authUrl.toString();
-});
-
-// --- HELPER FUNCTIONS ---
-function generateRandomString(length) {
-  let text = "";
+function generateRandomString(length = 128) {
   const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let text = "";
   for (let i = 0; i < length; i++) {
     text += possible.charAt(Math.floor(Math.random() * possible.length));
   }
@@ -38,44 +10,129 @@ function generateRandomString(length) {
 }
 
 async function generateCodeChallenge(codeVerifier) {
-  const data = new TextEncoder().encode(codeVerifier);
+  const encoder = new TextEncoder();
+  const data = encoder.encode(codeVerifier);
   const digest = await crypto.subtle.digest("SHA-256", data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(digest)))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
+  return base64;
 }
 
-// --- HANDLE REDIRECT (CALLBACK) ---
-if (window.location.search.includes("code=")) {
-  const urlParams = new URLSearchParams(window.location.search);
-  const code = urlParams.get("code");
-  const codeVerifier = localStorage.getItem("code_verifier");
+// AUTH FLOW LOGIC
 
-  if (!codeVerifier) {
-    alert("Code verifier not found. Please login again.");
-    window.location.href = "/";
-  } else {
-    fetch("http://localhost:3000/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, code_verifier: codeVerifier }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (!data.access_token) {
-          console.error("Token request failed:", data);
-          alert("Failed to get access token. Check console for details.");
-          return;
-        }
+const loginBtn = document.getElementById("loginBtn");
 
-        localStorage.setItem("access_token", data.access_token);
-        localStorage.removeItem("code_verifier"); // no longer needed
-        window.location.href = "/player/player.html"; // redirect to player page
-      })
-      .catch(err => {
-        console.error("Token request error:", err);
-        alert("Error fetching access token. Check console.");
-      });
+const CONFIG_URL = "/config";
+const TOKEN_URL = "/token";
+
+(async function init() {
+  const params = new URLSearchParams(window.location.search);
+
+  // Handle callback 
+  if (params.has("code")) {
+    await handleCallback(params.get("code"));
+    return;
+  }
+
+  // Attach login button
+  if (loginBtn) {
+    loginBtn.addEventListener("click", login);
+  }
+})();
+
+async function getConfig() {
+  const res = await fetch(CONFIG_URL);
+  if (!res.ok) throw new Error("Failed to load config");
+  return res.json();
+}
+
+async function login() {
+  try {
+    const cfg = await getConfig();
+
+    const codeVerifier = generateRandomString(128);
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+    localStorage.setItem("pkce_code_verifier", codeVerifier);
+
+    const authUrl = new URL("https://accounts.spotify.com/authorize");
+    authUrl.searchParams.set("client_id", cfg.clientId);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("redirect_uri", cfg.redirectUri);
+    authUrl.searchParams.set("scope", cfg.scopes);
+    authUrl.searchParams.set("code_challenge_method", "S256");
+    authUrl.searchParams.set("code_challenge", codeChallenge);
+
+    window.location.href = authUrl.toString();
+  } catch (err) {
+    console.error("Login failed:", err);
+    alert("Could not start login. Check console.");
   }
 }
+
+async function handleCallback(code) {
+  const codeVerifier = localStorage.getItem("pkce_code_verifier");
+  if (!codeVerifier) {
+    alert("Missing PKCE verifier. Login again.");
+    window.location.href = "/";
+    return;
+  }
+
+  try {
+    const res = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, code_verifier: codeVerifier })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      console.error("Token exchange failed:", data);
+      alert("Token exchange failed. Check console.");
+      window.location.href = "/";
+      return;
+    }
+
+    localStorage.setItem("access_token", data.access_token);
+    if (data.refresh_token) localStorage.setItem("refresh_token", data.refresh_token);
+    localStorage.removeItem("pkce_code_verifier");
+
+    window.location.href = "/player/player.html";
+  } catch (err) {
+    console.error("Callback error:", err);
+    alert("Authentication failed.");
+    window.location.href = "/";
+  }
+}
+
+async function refreshAccessToken() {
+  const refreshToken = localStorage.getItem("refresh_token");
+  if (!refreshToken) return false;
+
+  try {
+    const res = await fetch("/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        grant_type: "refresh_token", 
+        refresh_token: refreshToken 
+      })
+    });
+    
+    const data = await res.json();
+    if (res.ok && data.access_token) {
+      console.log("Token refreshed successfully");
+      localStorage.setItem("access_token", data.access_token);
+      if (data.refresh_token) localStorage.setItem("refresh_token", data.refresh_token);
+      return true;
+    }
+    console.error("Failed to refresh token", data);
+  } catch (err) {
+    console.error("Refresh token error:", err);
+  }
+  return false;
+}
+
+window.refreshAccessToken = refreshAccessToken;
