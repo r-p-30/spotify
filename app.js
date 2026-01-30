@@ -42,6 +42,7 @@ app.get("/config", (req, res) => {
       "playlist-read-private",
       "playlist-read-collaborative",
       "user-library-read",
+      "user-library-modify",
       "user-read-private",
       "user-read-email"
     ].join(" ")

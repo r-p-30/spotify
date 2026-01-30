@@ -332,8 +332,14 @@ ul li:hover {
 /* Navigation */
 .controls {
   display: flex;
-  justify-content: space-around;
+  justify-content: space-between;
+  align-items: center;
   margin-top: auto;
+}
+
+.controls-group-center {
+  display: flex;
+  gap: 5px;
 }
 
 .player-grid {
@@ -365,7 +371,7 @@ ul li:hover {
   padding: 1rem 1.5rem;
   border-radius: 20px;
   border: 1px solid rgba(255,255,255,0.15);
-  max-height: 420px; /* scrollable if needed */
+  max-height: 420px; 
   overflow-y: auto;
 }
 
@@ -436,6 +442,17 @@ ul li:hover {
 #shuffleBtn.shuffle-on {
   color: #1db954;
   transform: scale(1.15);
+  padding: 0px;
+}
+
+/* Like Button Active State */
+#likeBtn.active {
+  color: #1db954;
+  padding: 0px;
+}
+
+#likeBtn.active i {
+  font-weight: 900;
 }
 
 /* Tooltip styling */
@@ -457,7 +474,7 @@ ul li:hover {
 
 #shuffleBtn.shuffle-active {
   color: #1db954;
-  transform: scale(1.1);
+  padding: 0px;
 }
 
 /* PLAYLIST TILES SECTION */

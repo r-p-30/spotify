@@ -159,6 +159,7 @@ document.getElementById("playlistSearchInput").addEventListener("input", (e) => 
 document.getElementById("prevBtn").onclick = prev;
 document.getElementById("nextBtn").onclick = next;
 document.getElementById("shuffleBtn").onclick = toggleShuffle;
+document.getElementById("likeBtn").onclick = toggleLike;
 
 
 playPauseBtn.onclick = () => {
@@ -325,6 +326,69 @@ function updateCurrentTrackInfo(track) {
   trackNameEl.textContent = track.name;
   trackArtistEl.textContent = track.artists.map(a => a.name).join(", ");
   trackImageEl.src = track.album.images[0]?.url || "";
+
+  checkIfLiked(track.id);
+}
+
+// TOGGLE LIKE
+async function toggleLike() {
+  if (!currentTrackUri) return;
+
+  const trackId = currentTrackUri.split(":").pop();
+  const btn = document.getElementById("likeBtn");
+  const isLiked = btn.classList.contains("active");
+
+  // Optimistic update
+  btn.classList.toggle("active");
+  const icon = btn.querySelector("i");
+  icon.className = isLiked ? "far fa-heart" : "fas fa-heart";
+
+  const method = isLiked ? "DELETE" : "PUT";
+  
+  try {
+    const res = await fetchWithAuth(`https://api.spotify.com/v1/me/tracks?ids=${trackId}`, {
+      method: method,
+    });
+
+    if (!res.ok) {
+       throw new Error("Failed to update like status");
+    }
+
+    // Refresh liked songs list if we are currently viewing it
+    if (selectedPlaylistName === "Liked Songs") {
+        loadLikedSongs(); // Reload to reflect changes
+    }
+
+  } catch (err) {
+    console.error("Like toggle failed", err);
+    // Revert on failure
+    btn.classList.toggle("active");
+    icon.className = isLiked ? "fas fa-heart" : "far fa-heart";
+    alert("Failed to update like status");
+  }
+}
+
+async function checkIfLiked(trackId) {
+  if (!trackId) return;
+
+  try {
+    const res = await fetchWithAuth(`https://api.spotify.com/v1/me/tracks/contains?ids=${trackId}`);
+    const [isLiked] = await res.json();
+    
+    const btn = document.getElementById("likeBtn");
+    const icon = btn.querySelector("i");
+
+    if (isLiked) {
+      btn.classList.add("active");
+      icon.className = "fas fa-heart";
+    } else {
+      btn.classList.remove("active");
+      icon.className = "far fa-heart";
+    }
+
+  } catch (err) {
+    console.error("Failed to check like status", err);
+  }
 }
 
 // LIKED SONGS
