@@ -162,13 +162,18 @@ document.getElementById("shuffleBtn").onclick = toggleShuffle;
 document.getElementById("likeBtn").onclick = toggleLike;
 
 
-playPauseBtn.onclick = () => {
-  if (isPlaying) pause();
-  else {
+playPauseBtn.onclick = async () => {
+  if (!player) return;
+
+  const state = await player.getCurrentState();
+  if (!state) {
+    // No active playback on this device, start from the top of the selected playlist
     playContext({
       contextUri: selectedPlaylist.contextUri,
       offset: 0,
     });
+  } else {
+    player.togglePlay();
   }
 };
 
