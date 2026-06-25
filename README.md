@@ -1,6 +1,6 @@
 # Spotify Player
 
-A personal Spotify client built on top of the [Spotify Web API](https://developer.spotify.com/documentation/web-api) and [Web Playback SDK](https://developer.spotify.com/documentation/web-playback-sdk). Created because the official Spotify desktop app is blocked after system hardening — this runs entirely locally using your own Spotify Developer credentials, so playback is controlled through your account with no restrictions.
+A personal Spotify client built on top of the [Spotify Web API](https://developer.spotify.com/documentation/web-api) and [Web Playback SDK](https://developer.spotify.com/documentation/web-playback-sdk). Created because the official Spotify desktop app is blocked for hardened systems, this runs entirely locally using your own Spotify Developer credentials, so playback is controlled through your account with no restrictions.
 
 Features include playlist browsing, search, lyrics, queue view, audio stats, and full playback control.
 
