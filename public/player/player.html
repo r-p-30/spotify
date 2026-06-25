@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spotify Player</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="player.css">
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script defer src="../auth.js"></script>
+  <script defer src="player.js"></script>
+</head>
+
+<body>
+  <div class="container">
+
+    <!-- HEADER -->
+    <header>
+      <div class="header-brand">
+        <svg viewBox="0 0 32 32" width="26" height="26" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="32" height="32" rx="8" fill="#2e7bff" />
+          <path d="M22 9v10.27A3.5 3.5 0 1 1 19 16V11.6l-8 1.6V21.27A3.5 3.5 0 1 1 8 18V11l14-2.8V9z" fill="white"
+            transform="translate(3 0)" />
+        </svg>
+        <h1>Music Player</h1>
+      </div>
+      <button id="logoutBtn" class="btn-logout">Logout</button>
+    </header>
+
+    <!-- GLOBAL SEARCH BAR (centered, above panels) -->
+    <div class="search-bar-wrap">
+      <section class="search">
+        <input type="text" id="searchInput" placeholder="Search for tracks, albums, artists...">
+        <button id="searchBtn" class="btn-search"><i class="fas fa-search"></i></button>
+        <div id="loader" class="loader" hidden></div>
+      </section>
+      <div id="searchResultsWrap">
+        <div class="search-tabs" id="searchTabBar">
+          <button class="s-tab active" data-type="tracks">Tracks</button>
+          <button class="s-tab" data-type="albums">Albums</button>
+          <button class="s-tab" data-type="artists">Artists</button>
+          <button class="s-tab" data-type="playlists">Playlists</button>
+        </div>
+        <ul id="searchResults"></ul>
+      </div>
+    </div>
+
+    <!-- 3-PANEL BODY -->
+    <div class="app-body">
+
+      <!-- LEFT SIDEBAR: Playlists / Recently / Recommendations -->
+      <aside class="sidebar-left">
+        <section class="playlists">
+          <div class="section-tabs">
+            <button class="sec-tab active" data-target="playlistList">Your Playlists</button>
+            <button class="sec-tab" data-target="recentlyPlayedList">Recently Played</button>
+            <button class="sec-tab" data-target="recommendedList">More Like This</button>
+          </div>
+          <ul id="playlistList"></ul>
+          <ul id="recentlyPlayedList" class="tab-hidden"></ul>
+          <div id="recommendedList" class="tab-hidden">
+            <p class="rec-placeholder">Play a song and click "More Like This" to get recommendations.</p>
+          </div>
+        </section>
+      </aside>
+
+      <!-- MIDDLE PANEL: Player card + Lyrics (top) | Queue (bottom, always visible) -->
+      <main class="main-panel">
+        <div class="top-row">
+          <!-- Flip Card (front = player, back = audio stats) -->
+          <div class="flip-card" id="trackCard">
+            <div class="flip-card-inner">
+
+              <!-- FRONT: Player -->
+              <div class="flip-card-front current-track">
+                <div class="track-info">
+                  <img id="trackImage" src="" alt="Album Art" title="Click for audio stats">
+                  <div class="track-meta">
+                    <div class="track-text">
+                      <h2 id="trackName">No song playing</h2>
+                      <p id="trackArtist"></p>
+                    </div>
+                    <div class="now-playing-actions" id="nowPlayingActions">
+                      <button id="likeCurrentBtn" class="action-btn" title="Add to Liked Songs"><i
+                          class="fas fa-heart"></i></button>
+                      <button id="moreCurrentBtn" class="action-btn" title="More options"><i
+                          class="fas fa-ellipsis-h"></i></button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="progress-area">
+                  <span id="currentTime">0:00</span>
+                  <input type="range" id="progressBar" min="0" max="100" value="0">
+                  <span id="totalDuration">0:00</span>
+                </div>
+
+                <div class="controls">
+                  <div class="controls-left">
+                    <button id="shuffleBtn" class="control-btn control-btn--secondary" title="Shuffle"><i
+                        class="fas fa-random"></i></button>
+                  </div>
+                  <div class="controls-center">
+                    <button id="prevBtn" class="control-btn control-btn--secondary" title="Previous"><i
+                        class="fas fa-backward"></i></button>
+                    <button id="playPauseBtn" class="control-btn control-btn--primary" title="Play/Pause"><i
+                        class="fas fa-play"></i></button>
+                    <button id="nextBtn" class="control-btn control-btn--secondary" title="Next"><i
+                        class="fas fa-forward"></i></button>
+                  </div>
+                  <div class="controls-right">
+                    <button id="lyricsBtn" class="control-btn control-btn--secondary" title="Lyrics"><i
+                        class="fas fa-microphone-alt"></i></button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- BACK: Audio Stats -->
+              <div class="flip-card-back">
+                <div class="audio-features-panel">
+                  <div class="af-header">
+                    <h3 class="af-title">Audio Stats</h3>
+                    <button id="flipBackBtn" class="btn-icon" title="Back"><i class="fas fa-arrow-left"></i></button>
+                  </div>
+                  <div id="audioFeaturesContent" class="af-content">
+                    <p class="af-placeholder">Play a song to see stats.</p>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- LYRICS PANEL (slides in beside player card) -->
+          <section id="lyricsSection" class="lyrics-section">
+            <div class="lyrics-header">
+              <h3>Lyrics</h3>
+              <div class="lyrics-header-actions">
+                <button id="jumpToCurrentBtn" class="btn-icon jump-btn" title="Jump to current line">
+                  <i class="fas fa-crosshairs"></i> Current
+                </button>
+                <button id="lyricsCloseBtn" class="btn-icon" title="Close lyrics">
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+            </div>
+            <div id="lyricsContainer" class="lyrics-container">
+              <p class="lyrics-placeholder">No lyrics found.</p>
+            </div>
+          </section>
+        </div>
+
+        <!-- QUEUE: always visible, fills remaining height -->
+        <section id="queueSection" class="queue-section open">
+          <div class="queue-header">
+            <h3>Up Next</h3>
+            <button id="queueRefreshBtn" class="btn-icon" title="Refresh queue"><i class="fas fa-sync-alt"></i></button>
+          </div>
+          <div id="queueContent" class="queue-content">
+            <p class="queue-placeholder">Nothing in queue.</p>
+          </div>
+        </section>
+      </main>
+
+      <!-- RIGHT SIDEBAR: Selected Playlist -->
+      <aside class="sidebar-right">
+        <div class="selected-playlist">
+          <div class="playlist-title-bar">
+            <h2 id="selectedPlaylistName" class="truncate-text" title="Liked Songs">Liked Songs</h2>
+            <div class="playlist-title-actions">
+              <span id="playlistTrackCount" class="track-count-badge"></span>
+              <input type="text" id="playlistSearchInput" class="playlist-search-selected" placeholder="Search">
+            </div>
+          </div>
+          <ul id="selectedPlaylistTracks"></ul>
+        </div>
+      </aside>
+
+    </div><!-- .app-body -->
+  </div><!-- .container -->
+
+  <!-- CONTEXT MENUS -->
+  <div id="trackContextMenu" class="context-menu">
+    <ul>
+      <li id="ctxAddToLiked"><i class="fas fa-heart"></i> Add to Liked Songs</li>
+      <li id="ctxRemoveFromLiked" hidden><i class="fas fa-heart-broken"></i> Remove from Liked Songs</li>
+      <li id="ctxAddToQueue"><i class="fas fa-plus-circle"></i> Add to Queue</li>
+      <li id="ctxAddToPlaylist"><i class="fas fa-plus"></i> Add to Playlist <i class="fas fa-chevron-right"
+          style="margin-left:auto"></i></li>
+    </ul>
+  </div>
+  <div id="playlistSubmenu" class="context-menu">
+    <ul id="playlistSubmenuList"></ul>
+  </div>
+
+  <div id="nowPlayingContextMenu" class="context-menu">
+    <ul>
+      <li id="ctxMoreLikeThis"><i class="fas fa-magic"></i> More Like This</li>
+      <li id="ctxNpAddToQueue"><i class="fas fa-plus-circle"></i> Add to Queue</li>
+      <li id="ctxNpAddToLiked"><i class="fas fa-heart"></i> Add to Liked Songs</li>
+      <li id="ctxNpRemoveFromLiked" hidden><i class="fas fa-heart-broken"></i> Remove from Liked Songs</li>
+    </ul>
+  </div>
+
+  <div id="toastMsg" class="toast"></div>
+</body>
+
+</html>
