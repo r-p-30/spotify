@@ -43,8 +43,12 @@ app.get("/config", (req, res) => {
       "playlist-read-collaborative",
       "user-library-read",
       "user-library-modify",
+      "playlist-modify-public",
+      "playlist-modify-private",
+      "user-library-modify",
       "user-read-private",
-      "user-read-email"
+      "user-read-email",
+      "user-read-recently-played"
     ].join(" ")
   });
 });
@@ -55,28 +59,28 @@ app.post("/token", async (req, res) => {
 
   try {
     let params;
-  if (grant_type === "refresh_token") {
-    if (!refresh_token) {
-      return res.status(400).json({ error: "Missing refresh_token" });
+    if (grant_type === "refresh_token") {
+      if (!refresh_token) {
+        return res.status(400).json({ error: "Missing refresh_token" });
+      }
+      params = new URLSearchParams({
+        client_id: CLIENT_ID,
+        grant_type: "refresh_token",
+        refresh_token
+      });
+    } else {
+      // Default to strict auth code check
+      if (!code || !code_verifier) {
+        return res.status(400).json({ error: "Missing code or code_verifier" });
+      }
+      params = new URLSearchParams({
+        client_id: CLIENT_ID,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: REDIRECT_URI,
+        code_verifier
+      });
     }
-    params = new URLSearchParams({
-      client_id: CLIENT_ID,
-      grant_type: "refresh_token",
-      refresh_token
-    });
-  } else {
-    // Default to strict auth code check
-    if (!code || !code_verifier) {
-      return res.status(400).json({ error: "Missing code or code_verifier" });
-    }
-    params = new URLSearchParams({
-      client_id: CLIENT_ID,
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: REDIRECT_URI,
-      code_verifier
-    });
-  }
 
     const tokenResponse = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",

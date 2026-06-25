@@ -97,6 +97,7 @@ async function handleCallback(code) {
 
     localStorage.setItem("access_token", data.access_token);
     if (data.refresh_token) localStorage.setItem("refresh_token", data.refresh_token);
+    if (data.expires_in) localStorage.setItem("token_expiry", Date.now() + data.expires_in * 1000);
     localStorage.removeItem("pkce_code_verifier");
 
     window.location.href = "/player/player.html";
@@ -126,6 +127,7 @@ async function refreshAccessToken() {
       console.log("Token refreshed successfully");
       localStorage.setItem("access_token", data.access_token);
       if (data.refresh_token) localStorage.setItem("refresh_token", data.refresh_token);
+      if (data.expires_in) localStorage.setItem("token_expiry", Date.now() + data.expires_in * 1000);
       return true;
     }
     console.error("Failed to refresh token", data);
