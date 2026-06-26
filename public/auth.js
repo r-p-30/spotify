@@ -131,6 +131,13 @@ async function refreshAccessToken() {
       return true;
     }
     console.error("Failed to refresh token", data);
+    if (data.spotify_error === "invalid_grant") {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("token_expiry");
+      window.location.href = "/";
+      return false;
+    }
   } catch (err) {
     console.error("Refresh token error:", err);
   }
