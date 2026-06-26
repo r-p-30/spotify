@@ -378,14 +378,14 @@ function loaderHTML() {
 
 // PLAYBACK
 async function playContext({ contextUri, uris, offset = 0 }) {
-  if (!deviceId) return;
+  if (!deviceId) { showToast("Player not ready — try again in a moment"); return; }
 
   const body = {};
 
   if (uris) {
     body.uris = uris;
     body.offset = { position: offset };
-  } else if (contextUri === "spotify:user:me:collection") {
+  } else if (contextUri === "spotify:user:me:collection" || contextUri?.startsWith("spotify:artist:")) {
     body.uris = selectedPlaylist.tracks.map(t => t.uri);
     body.offset = { position: offset };
   } else {
@@ -674,7 +674,10 @@ function renderPlaylistSidebar() {
     const li = createPlaylistCard({
       name: "Liked Songs",
       images: [] // No image, will handle in createPlaylistCard
-    }, true);
+    }, true, async () => {
+      await loadLikedSongs();
+      playContext({ contextUri: "spotify:user:me:collection", offset: 0 });
+    });
     li.onclick = loadLikedSongs;
     ul.appendChild(li);
   }
@@ -683,13 +686,16 @@ function renderPlaylistSidebar() {
   cachedPlaylists.forEach(pl => {
     if (pl.name === selectedPlaylistName) return;
 
-    const li = createPlaylistCard(pl);
+    const li = createPlaylistCard(pl, false, async () => {
+      await selectPlaylist(pl);
+      playContext({ contextUri: pl.uri, offset: 0 });
+    });
     li.onclick = () => selectPlaylist(pl);
     ul.appendChild(li);
   });
 }
 
-function createPlaylistCard(pl, isLikedSongs = false) {
+function createPlaylistCard(pl, isLikedSongs = false, onPlay = null) {
   const li = document.createElement("li");
   li.className = "playlist-card";
   li.title = pl.name; // Tooltip for full name
@@ -726,6 +732,12 @@ function createPlaylistCard(pl, isLikedSongs = false) {
   playBtn.innerHTML = '<i class="fas fa-play"></i>';
   playBtn.title = "Play";
   imgDiv.style.position = "relative";
+  if (onPlay) {
+    playBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onPlay();
+    });
+  }
   imgDiv.appendChild(playBtn);
 
   li.appendChild(imgDiv);
@@ -1164,7 +1176,12 @@ function startTokenRefreshTimer() {
     if (expiry - Date.now() < 5 * 60 * 1000) {
       console.log("Token near expiry, refreshing proactively...");
       const ok = await window.refreshAccessToken?.();
-      if (ok) token = localStorage.getItem("access_token");
+      if (ok) {
+        token = localStorage.getItem("access_token");
+      } else {
+        clearInterval(tokenRefreshTimer);
+        window.location.href = "/";
+      }
     }
   }, 4 * 60 * 1000);
 }

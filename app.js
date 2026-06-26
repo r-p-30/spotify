@@ -91,7 +91,12 @@ app.post("/token", async (req, res) => {
     if (!tokenResponse.ok) {
       const text = await tokenResponse.text();
       console.error("Token exchange failed:", tokenResponse.status, text);
-      return res.status(502).json({ error: "Failed to exchange token" });
+      try {
+        const spotifyErr = JSON.parse(text);
+        return res.status(502).json({ error: "Failed to exchange token", spotify_error: spotifyErr.error });
+      } catch {
+        return res.status(502).json({ error: "Failed to exchange token" });
+      }
     }
 
     const data = await tokenResponse.json();
