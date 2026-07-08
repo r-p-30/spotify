@@ -108,40 +108,58 @@ async function handleCallback(code) {
   }
 }
 
+// Singleton promise to prevent concurrent refresh calls from burning through
+// Spotify's one-time-use (rotated) refresh tokens, which causes a 500
+// "Failed to remove token" error on the second simultaneous request.
+let _refreshPromise = null;
+
 async function refreshAccessToken() {
+  if (_refreshPromise) {
+    // A refresh is already in-flight — piggyback on it instead of starting a new one
+    return _refreshPromise;
+  }
+
   const refreshToken = localStorage.getItem("refresh_token");
   if (!refreshToken) return false;
 
-  try {
-    const res = await fetch("/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        grant_type: "refresh_token", 
-        refresh_token: refreshToken 
-      })
-    });
-    
-    const data = await res.json();
-    if (res.ok && data.access_token) {
-      console.log("Token refreshed successfully");
-      localStorage.setItem("access_token", data.access_token);
-      if (data.refresh_token) localStorage.setItem("refresh_token", data.refresh_token);
-      if (data.expires_in) localStorage.setItem("token_expiry", Date.now() + data.expires_in * 1000);
-      return true;
+  _refreshPromise = (async () => {
+    try {
+      const res = await fetch("/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.access_token) {
+        console.log("Token refreshed successfully");
+        localStorage.setItem("access_token", data.access_token);
+        if (data.refresh_token) localStorage.setItem("refresh_token", data.refresh_token);
+        if (data.expires_in) localStorage.setItem("token_expiry", Date.now() + data.expires_in * 1000);
+        return true;
+      }
+
+      console.error("Failed to refresh token", data);
+      if (data.spotify_error === "invalid_grant") {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        localStorage.removeItem("token_expiry");
+        window.location.href = "/";
+        return false;
+      }
+    } catch (err) {
+      console.error("Refresh token error:", err);
     }
-    console.error("Failed to refresh token", data);
-    if (data.spotify_error === "invalid_grant") {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("token_expiry");
-      window.location.href = "/";
-      return false;
-    }
-  } catch (err) {
-    console.error("Refresh token error:", err);
-  }
-  return false;
+    return false;
+  })().finally(() => {
+    // Clear the lock so future expiries can trigger a fresh refresh
+    _refreshPromise = null;
+  });
+
+  return _refreshPromise;
 }
 
 window.refreshAccessToken = refreshAccessToken;
