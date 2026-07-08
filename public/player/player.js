@@ -22,6 +22,9 @@ let isDraggingProgress = false;
 let currentTrackUri = null;
 let currentTrackObject = null;
 let cachedPlaylists = [];
+// Ordered URIs from the last fetched queue — used so clicking a queue track
+// preserves the remainder of the queue instead of starting a single-song context
+let cachedQueueUris = [];
 
 window.addEventListener("unhandledrejection", (event) => {
   console.error("Unhandled promise rejection:", event.reason);
@@ -74,8 +77,11 @@ window.onSpotifyWebPlaybackSDKReady = function () {
     deviceId = device_id;
     console.log("Spotify Player Ready:", device_id);
 
-    loadLikedSongs();
-    loadUserPlaylists();
+    // Restore active session first; loadLikedSongs falls back to default if nothing is playing
+    restorePlaybackSession().then(() => {
+      loadLikedSongs();
+      loadUserPlaylists();
+    });
     syncShuffleState();
     startTokenRefreshTimer();
   });
@@ -136,6 +142,10 @@ window.onSpotifyWebPlaybackSDKReady = function () {
     }
 
     updateProgressState(state);
+
+    // Keep a lightweight snapshot in localStorage so a page refresh can resume
+    // from the exact same track and position.
+    savePlaybackSnapshot(state);
   });
 
   player.connect();
@@ -377,7 +387,7 @@ function loaderHTML() {
 }
 
 // PLAYBACK
-async function playContext({ contextUri, uris, offset = 0 }) {
+async function playContext({ contextUri, uris, offset = 0, positionMs = 0 }) {
   if (!deviceId) { showToast("Player not ready — try again in a moment"); return; }
 
   const body = {};
@@ -392,6 +402,9 @@ async function playContext({ contextUri, uris, offset = 0 }) {
     body.context_uri = contextUri;
     body.offset = { position: offset };
   }
+
+  // Start at exact position (no separate seek needed, avoids the 0→position jump)
+  if (positionMs > 0) body.position_ms = positionMs;
 
   const res = await fetchWithAuth(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
     method: "PUT",
@@ -576,7 +589,8 @@ async function loadLikedSongs() {
     renderPlaylistSidebar();
     document.getElementById("selectedPlaylistTracks").scrollTop = 0;
 
-    // On first load: if nothing is actively playing, show first track + seed queue
+    // On first load: only show the first-track placeholder if nothing was restored
+    // from an active Spotify session (restorePlaybackSession sets currentTrackUri first)
     if (!currentTrackUri && selectedPlaylist.tracks.length > 0) {
       const first = selectedPlaylist.tracks[0];
       currentTrackUri = first.uri;
@@ -1169,6 +1183,83 @@ function showToast(message) {
   setTimeout(() => toast.classList.remove("visible"), 2500);
 }
 
+// ============================================================
+// PLAYBACK SESSION RESTORE (on page refresh)
+// ============================================================
+
+/**
+ * Saves a compact snapshot of the current playback state to localStorage.
+ * Called on every player_state_changed so a refresh can pick up exactly where
+ * we left off. We intentionally skip saving large URI lists to avoid hitting
+ * the ~5 MB localStorage limit — contextUri + offset covers playlists/albums;
+ * Liked Songs falls back to single-track restore.
+ */
+function savePlaybackSnapshot(state) {
+  const track = state.track_window?.current_track;
+  if (!track) return;
+  try {
+    const isLikedOrArtist =
+      !selectedPlaylist.contextUri ||
+      selectedPlaylist.contextUri === "spotify:user:me:collection" ||
+      selectedPlaylist.contextUri.startsWith("spotify:artist:");
+
+    const snap = {
+      trackUri:    track.uri,
+      positionMs:  state.position,
+      paused:      state.paused,
+      // For proper-context sources (playlists / albums) save the Spotify URI
+      contextUri:  isLikedOrArtist ? null : selectedPlaylist.contextUri,
+      trackOffset: selectedPlaylist.tracks.findIndex(t => t.uri === track.uri),
+    };
+    localStorage.setItem("pb_snapshot", JSON.stringify(snap));
+  } catch { /* localStorage full — skip silently */ }
+}
+
+/**
+ * On page load, reads the saved snapshot and resumes playback:
+ * - Proper Spotify context (playlist/album) → playContext with contextUri + offset
+ * - Liked Songs / artist top tracks        → play single track URI
+ * Then seeks to the saved position and pauses if the session was paused.
+ * Falls through harmlessly if no snapshot exists.
+ */
+async function restorePlaybackSession() {
+  const raw = localStorage.getItem("pb_snapshot");
+  if (!raw) return;
+
+  let snap;
+  try { snap = JSON.parse(raw); } catch { return; }
+  if (!snap?.trackUri) return;
+
+  console.log("[restore] Resuming from snapshot:", snap.trackUri, "@", snap.positionMs, "ms", snap.paused ? "(paused)" : "(playing)");
+
+  // Set state now so loadLikedSongs() (called after us) skips the first-track placeholder
+  currentTrackUri  = snap.trackUri;
+  hasStartedPlayback = true;
+
+  try {
+    if (snap.contextUri) {
+      // Full Spotify context — restores the correct track order and queue
+      const offset = snap.trackOffset >= 0 ? snap.trackOffset : 0;
+      await playContext({ contextUri: snap.contextUri, offset, positionMs: snap.positionMs });
+    } else {
+      // Liked Songs / artist context — just play the track; queue rebuilds naturally
+      await playContext({ uris: [snap.trackUri], positionMs: snap.positionMs });
+    }
+
+    // If the page was refreshed while paused, pause after the play request settles
+    if (snap.paused) {
+      await new Promise(r => setTimeout(r, 800));
+      await pause();
+    }
+
+  } catch (err) {
+    console.warn("[restore] Restore failed — falling back to default init:", err);
+    // Let loadLikedSongs() take over normally
+    currentTrackUri    = null;
+    hasStartedPlayback = false;
+  }
+}
+
 function startTokenRefreshTimer() {
   if (tokenRefreshTimer) clearInterval(tokenRefreshTimer);
   tokenRefreshTimer = setInterval(async () => {
@@ -1319,8 +1410,14 @@ function renderInitialQueue(tracks) {
     content.innerHTML = '<p class="queue-placeholder">Nothing in queue.</p>';
     return;
   }
-  upcoming.forEach(track => {
-    const li = buildTrackRow(track, () => playContext({ uris: [track.uri] }));
+  // Cache URIs so clicking any row plays from that point with the full tail
+  cachedQueueUris = tracks.map(t => t.uri);
+  upcoming.forEach((track, idx) => {
+    // idx is 0-based within `upcoming`, which starts at tracks[1]
+    const originalIdx = idx + 1;
+    const li = buildTrackRow(track, () =>
+      playContext({ uris: cachedQueueUris.slice(originalIdx) })
+    );
     content.appendChild(li);
   });
 }
@@ -1333,17 +1430,31 @@ async function loadQueueView() {
     if (!res.ok) throw new Error("Failed");
     const data = await res.json();
     content.innerHTML = "";
+
+    const currentTrack = data.currently_playing
+      ? { ...data.currently_playing, _isCurrent: true }
+      : null;
+    const upcomingTracks = (data.queue || []).filter(Boolean);
+
     const items = [
-      ...(data.currently_playing ? [{ ...data.currently_playing, _isCurrent: true }] : []),
-      ...(data.queue || []),
-    ].filter(Boolean);
+      ...(currentTrack ? [currentTrack] : []),
+      ...upcomingTracks,
+    ];
+
     if (!items.length) {
       content.innerHTML = '<p class="queue-placeholder">Queue is empty.</p>';
+      cachedQueueUris = [];
       return;
     }
-    items.forEach(track => {
+
+    // Cache the full ordered URI list (current + upcoming) so clicks preserve the queue tail
+    cachedQueueUris = items.map(t => t.uri);
+
+    items.forEach((track, idx) => {
       const li = buildTrackRow(track, () => {
-        if (!track._isCurrent) playContext({ uris: [track.uri] });
+        if (track._isCurrent) return; // clicking the current track does nothing
+        // Play from this track onward — preserves the rest of the queue order
+        playContext({ uris: cachedQueueUris.slice(idx) });
       });
       if (track._isCurrent) li.classList.add("queue-current");
       content.appendChild(li);
