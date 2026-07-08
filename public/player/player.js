@@ -589,9 +589,9 @@ async function loadLikedSongs() {
     renderPlaylistSidebar();
     document.getElementById("selectedPlaylistTracks").scrollTop = 0;
 
-    // On first load: only show the first-track placeholder if nothing was restored
-    // from an active Spotify session (restorePlaybackSession sets currentTrackUri first)
-    if (!currentTrackUri && selectedPlaylist.tracks.length > 0) {
+    // On first load: only show the first-track placeholder if nothing is being restored.
+    // hasStartedPlayback is set true by restorePlaybackSession before we run.
+    if (!hasStartedPlayback && selectedPlaylist.tracks.length > 0) {
       const first = selectedPlaylist.tracks[0];
       currentTrackUri = first.uri;
       updateCurrentTrackInfo(first);
@@ -1190,9 +1190,9 @@ function showToast(message) {
 /**
  * Saves a compact snapshot of the current playback state to localStorage.
  * Called on every player_state_changed so a refresh can pick up exactly where
- * we left off. We intentionally skip saving large URI lists to avoid hitting
- * the ~5 MB localStorage limit — contextUri + offset covers playlists/albums;
- * Liked Songs falls back to single-track restore.
+ * we left off. For proper Spotify contexts (playlists/albums) we save the URI;
+ * for Liked Songs / artist top tracks we save up to 50 URIs from the current
+ * position onward so the queue survives the restore.
  */
 function savePlaybackSnapshot(state) {
   const track = state.track_window?.current_track;
@@ -1203,13 +1203,19 @@ function savePlaybackSnapshot(state) {
       selectedPlaylist.contextUri === "spotify:user:me:collection" ||
       selectedPlaylist.contextUri.startsWith("spotify:artist:");
 
+    const trackOffset = selectedPlaylist.tracks.findIndex(t => t.uri === track.uri);
+
     const snap = {
       trackUri:    track.uri,
       positionMs:  state.position,
       paused:      state.paused,
-      // For proper-context sources (playlists / albums) save the Spotify URI
       contextUri:  isLikedOrArtist ? null : selectedPlaylist.contextUri,
-      trackOffset: selectedPlaylist.tracks.findIndex(t => t.uri === track.uri),
+      trackOffset,
+      // For Liked Songs / artist: save up to 50 URIs from this track onward
+      // so the restored queue isn't just a single repeated song.
+      queueUris: isLikedOrArtist && trackOffset >= 0
+        ? selectedPlaylist.tracks.slice(trackOffset, trackOffset + 50).map(t => t.uri)
+        : null,
     };
     localStorage.setItem("pb_snapshot", JSON.stringify(snap));
   } catch { /* localStorage full — skip silently */ }
@@ -1218,8 +1224,8 @@ function savePlaybackSnapshot(state) {
 /**
  * On page load, reads the saved snapshot and resumes playback:
  * - Proper Spotify context (playlist/album) → playContext with contextUri + offset
- * - Liked Songs / artist top tracks        → play single track URI
- * Then seeks to the saved position and pauses if the session was paused.
+ * - Liked Songs / artist top tracks        → playContext with saved queue URIs
+ * Position is passed directly in the play request (no separate seek / jump).
  * Falls through harmlessly if no snapshot exists.
  */
 async function restorePlaybackSession() {
@@ -1232,8 +1238,9 @@ async function restorePlaybackSession() {
 
   console.log("[restore] Resuming from snapshot:", snap.trackUri, "@", snap.positionMs, "ms", snap.paused ? "(paused)" : "(playing)");
 
-  // Set state now so loadLikedSongs() (called after us) skips the first-track placeholder
-  currentTrackUri  = snap.trackUri;
+  // Guard loadLikedSongs() first-track placeholder without setting currentTrackUri.
+  // If we set currentTrackUri here, player_state_changed sees trackChanged=false
+  // and skips updateCurrentTrackInfo — leaving the UI at "No song playing".
   hasStartedPlayback = true;
 
   try {
@@ -1242,8 +1249,9 @@ async function restorePlaybackSession() {
       const offset = snap.trackOffset >= 0 ? snap.trackOffset : 0;
       await playContext({ contextUri: snap.contextUri, offset, positionMs: snap.positionMs });
     } else {
-      // Liked Songs / artist context — just play the track; queue rebuilds naturally
-      await playContext({ uris: [snap.trackUri], positionMs: snap.positionMs });
+      // Liked Songs / artist — use saved queue URIs so UP NEXT is populated correctly
+      const uris = snap.queueUris?.length ? snap.queueUris : [snap.trackUri];
+      await playContext({ uris, positionMs: snap.positionMs });
     }
 
     // If the page was refreshed while paused, pause after the play request settles
@@ -1254,8 +1262,6 @@ async function restorePlaybackSession() {
 
   } catch (err) {
     console.warn("[restore] Restore failed — falling back to default init:", err);
-    // Let loadLikedSongs() take over normally
-    currentTrackUri    = null;
     hasStartedPlayback = false;
   }
 }
