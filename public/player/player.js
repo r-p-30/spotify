@@ -84,6 +84,14 @@ window.onSpotifyWebPlaybackSDKReady = function () {
     });
     syncShuffleState();
     startTokenRefreshTimer();
+
+    // Register OS media key handlers (forward / back buttons on system widget)
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.setActionHandler("previoustrack", () => prev());
+      navigator.mediaSession.setActionHandler("nexttrack",     () => next());
+      navigator.mediaSession.setActionHandler("play",  () => playPauseBtn.click());
+      navigator.mediaSession.setActionHandler("pause", () => playPauseBtn.click());
+    }
   });
 
   player.addListener("not_ready", ({ device_id }) => {
@@ -129,6 +137,9 @@ window.onSpotifyWebPlaybackSDKReady = function () {
 
       if (trackChanged) {
         updateCurrentTrackInfo(state.track_window.current_track);
+
+        // Keep OS media widget in sync with the current track
+        updateMediaSessionMetadata(state.track_window.current_track);
 
         const lyricsSection = document.getElementById("lyricsSection");
         if (lyricsSection.classList.contains("open")) {
@@ -522,6 +533,24 @@ function updatePlayPauseButton(state) {
   playPauseBtn.querySelector("i").className = state
     ? "fas fa-pause"
     : "fas fa-play";
+}
+
+// Keep the OS media widget (system tray / lock screen) in sync
+function updateMediaSessionMetadata(track) {
+  if (!("mediaSession" in navigator) || !track) return;
+
+  const artwork = (track.album.images || []).map(img => ({
+    src: img.url,
+    sizes: `${img.width || 512}x${img.height || 512}`,
+    type: "image/jpeg",
+  }));
+
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title:  track.name,
+    artist: track.artists.map(a => a.name).join(", "),
+    album:  track.album.name,
+    artwork,
+  });
 }
 
 function setShuffleUI(state) {
@@ -1457,10 +1486,23 @@ async function loadQueueView() {
     cachedQueueUris = items.map(t => t.uri);
 
     items.forEach((track, idx) => {
-      const li = buildTrackRow(track, () => {
+      const li = buildTrackRow(track, async () => {
         if (track._isCurrent) return; // clicking the current track does nothing
-        // Play from this track onward — preserves the rest of the queue order
-        playContext({ uris: cachedQueueUris.slice(idx) });
+
+        // Skip forward via repeated /next calls so Spotify's internal history
+        // is preserved — hitting ⏮ afterwards correctly goes back to the
+        // previous track instead of losing the old queue context.
+        // idx 0 is the current track, so idx already equals the number of skips needed.
+        const skipsNeeded = idx;
+        for (let i = 0; i < skipsNeeded; i++) {
+          await fetchWithAuth(
+            `https://api.spotify.com/v1/me/player/next?device_id=${deviceId}`,
+            { method: "POST" }
+          );
+          // Small delay so Spotify registers each skip before the next
+          if (i < skipsNeeded - 1) await new Promise(r => setTimeout(r, 150));
+        }
+        resumeAfterSkip();
       });
       if (track._isCurrent) li.classList.add("queue-current");
       content.appendChild(li);
