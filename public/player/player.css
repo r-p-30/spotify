@@ -335,7 +335,7 @@ h1 {
 
 /* Flip card: fixed height = viewport minus header, search bar, queue, gaps */
 .flip-card {
-  height: calc(100vh - 230px);
+  height: calc(100vh - 310px);
   min-height: 280px;
   flex-shrink: 0;
   width: 100%;
@@ -374,6 +374,7 @@ h1 {
 
 .flip-card.flipped .flip-card-back {
   pointer-events: auto;
+  cursor: pointer;
 }
 
 .flip-card.flipped .flip-card-front {
@@ -389,8 +390,8 @@ h1 {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.8rem;
+  gap: 0.8rem;
+  padding: 1.2rem 1.5rem;
 }
 
 /* Album art — clickable to flip */
@@ -551,9 +552,9 @@ h1 {
 
 .track-info img {
   /* Fill available width, keep square, never exceed remaining height */
-  width: min(100%, calc(100% - 1rem));
+  width: min(100%, calc(100% - 2rem));
   aspect-ratio: 1 / 1;
-  max-height: 88%;
+  max-height: 70%;
   border-radius: 8px;
   object-fit: cover;
   background: #282828;

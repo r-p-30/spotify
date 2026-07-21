@@ -1621,12 +1621,6 @@ document.getElementById("trackImage").addEventListener("click", () => {
   fetchAudioFeatures(currentTrackUri.split(":")[2]);
 });
 
-document.getElementById("flipBackBtn").addEventListener("click", (e) => {
-  e.stopPropagation();
-  document.getElementById("trackCard").classList.remove("flipped");
-});
-
-// Clicking anywhere on the back face also flips back
 document.querySelector(".flip-card-back").addEventListener("click", () => {
   document.getElementById("trackCard").classList.remove("flipped");
 });
