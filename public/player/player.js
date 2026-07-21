@@ -1626,6 +1626,11 @@ document.getElementById("flipBackBtn").addEventListener("click", (e) => {
   document.getElementById("trackCard").classList.remove("flipped");
 });
 
+// Clicking anywhere on the back face also flips back
+document.querySelector(".flip-card-back").addEventListener("click", () => {
+  document.getElementById("trackCard").classList.remove("flipped");
+});
+
 async function fetchAudioFeatures(trackId) {
   const content = document.getElementById("audioFeaturesContent");
   content.innerHTML = loaderHTML();
