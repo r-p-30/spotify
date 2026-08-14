@@ -589,6 +589,7 @@ function updateCurrentTrackInfo(track) {
 
   // Show action buttons and sync like state
   document.getElementById("nowPlayingActions").classList.add("active");
+  document.getElementById("shareCurrentBtn").hidden = false;
   const trackId = track.uri.split(":")[2];
   checkTrackLiked(trackId).then(liked => {
     document.getElementById("likeCurrentBtn").classList.toggle("liked", liked);
@@ -1092,6 +1093,17 @@ document.getElementById("likeCurrentBtn").addEventListener("click", async (e) =>
   }
 });
 
+document.getElementById("shareCurrentBtn").addEventListener("click", () => {
+  if (!currentTrackUri) return;
+  const trackId = currentTrackUri.split(":")[2];
+  const link = `https://open.spotify.com/track/${trackId}`;
+  navigator.clipboard.writeText(link).then(() => {
+    showToast("Song link copied!");
+  }).catch(() => {
+    showToast("Copy failed — link: " + link);
+  });
+});
+
 document.getElementById("moreCurrentBtn").addEventListener("click", (e) => {
   e.stopPropagation();
   if (!currentTrackUri) return;
@@ -1107,6 +1119,18 @@ document.getElementById("moreCurrentBtn").addEventListener("click", (e) => {
     document.getElementById("ctxNpAddToLiked").hidden = liked;
     document.getElementById("ctxNpRemoveFromLiked").hidden = !liked;
   });
+});
+
+document.getElementById("ctxNpCopyLink").addEventListener("click", () => {
+  if (!currentTrackUri) return;
+  const trackId = currentTrackUri.split(":")[2];
+  const link = `https://open.spotify.com/track/${trackId}`;
+  navigator.clipboard.writeText(link).then(() => {
+    showToast("Song link copied!");
+  }).catch(() => {
+    showToast("Couldn't copy — try manually: " + link);
+  });
+  closeContextMenu();
 });
 
 // CONTEXT MENU
@@ -1621,8 +1645,7 @@ document.getElementById("trackImage").addEventListener("click", () => {
   fetchAudioFeatures(currentTrackUri.split(":")[2]);
 });
 
-document.getElementById("flipBackBtn").addEventListener("click", (e) => {
-  e.stopPropagation();
+document.querySelector(".flip-card-back").addEventListener("click", () => {
   document.getElementById("trackCard").classList.remove("flipped");
 });
 
