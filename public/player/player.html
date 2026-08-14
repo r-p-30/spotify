@@ -74,6 +74,9 @@
 
               <!-- FRONT: Player -->
               <div class="flip-card-front current-track">
+                <button id="shareCurrentBtn" class="card-share-btn" title="Copy song link" hidden>
+                  <i class="fas fa-share-nodes"></i>
+                </button>
                 <div class="track-info">
                   <img id="trackImage" src="" alt="Album Art" title="Click for audio stats">
                   <div class="track-meta">
@@ -200,6 +203,7 @@
       <li id="ctxNpAddToQueue"><i class="fas fa-plus-circle"></i> Add to Queue</li>
       <li id="ctxNpAddToLiked"><i class="fas fa-heart"></i> Add to Liked Songs</li>
       <li id="ctxNpRemoveFromLiked" hidden><i class="fas fa-heart-broken"></i> Remove from Liked Songs</li>
+      <li id="ctxNpCopyLink"><i class="fas fa-link"></i> Copy Song Link</li>
     </ul>
   </div>
 
