@@ -503,19 +503,65 @@ function resumeAfterSkip() {
 async function toggleShuffle() {
   const newState = !isShuffle;
 
+  // For URI-based contexts (Liked Songs, artist top tracks) Spotify doesn't
+  // maintain a server-side context — we must send all URIs ourselves.
+  // When enabling shuffle, fetch any pages the user hasn't scrolled to yet
+  // so Spotify gets the full track list for true randomness.
+  const isUriBased =
+    selectedPlaylist.contextUri === "spotify:user:me:collection" ||
+    selectedPlaylist.contextUri?.startsWith("spotify:artist:");
+
+  if (newState && isUriBased && nextTracksUrl) {
+    showToast("Fetching all tracks for shuffle…");
+    await fetchAllRemainingUris();
+  }
+
   const res = await fetchWithAuth(
     `https://api.spotify.com/v1/me/player/shuffle?state=${newState}&device_id=${deviceId}`,
-    {
-      method: "PUT",
-    }
+    { method: "PUT" }
   );
 
   if (res.ok) {
     setShuffleUI(newState);
+
+    // Re-issue playContext with the now-complete URI list.
+    if (newState && isUriBased) {
+      const allUris = selectedPlaylist.tracks.map(t => t.uri);
+      const currentIdx = currentTrackUri ? allUris.indexOf(currentTrackUri) : 0;
+      await playContext({
+        uris: allUris,
+        offset: currentIdx !== -1 ? currentIdx : 0,
+      });
+    }
+
     setTimeout(loadQueueView, 600);
   } else {
     const err = await res.json();
     alert(`Shuffle failed: ${err.error.message}`);
+  }
+}
+
+// Fetches all remaining paginated pages and appends URIs to selectedPlaylist.tracks.
+// Called only on shuffle — preserves lazy pagination for normal browsing.
+async function fetchAllRemainingUris() {
+  let url = nextTracksUrl;
+  const isLikedSongs = selectedPlaylist.contextUri === "spotify:user:me:collection";
+  while (url) {
+    try {
+      const res = await fetchWithAuth(url);
+      const data = await res.json();
+      url = data.next;
+      nextTracksUrl = data.next;
+      const newTracks = isLikedSongs
+        ? data.items.map(i => i.track).filter(Boolean)
+        : data.items.map(i => i.track).filter(Boolean);
+      selectedPlaylist.tracks.push(...newTracks);
+      // Append rows so the list is consistent if the user scrolls later
+      renderTrackList(newTracks, true);
+    } catch (err) {
+      console.error("fetchAllRemainingUris failed:", err);
+      break;
+    }
   }
 }
 
@@ -633,30 +679,6 @@ async function loadLikedSongs() {
     isLoadingPlaylist = false;
   }
 
-  // Silently fetch all remaining pages in background so shuffle includes every track.
-  // Spotify doesn't support context_uri for Liked Songs, so we must supply all URIs.
-  loadRemainingLikedSongs();
-}
-
-async function loadRemainingLikedSongs() {
-  const session = ++likedSongsLoadSession;
-  let url = nextTracksUrl;
-  while (url) {
-    if (session !== likedSongsLoadSession) return; // user switched away — abort
-    try {
-      const res = await fetchWithAuth(url);
-      const data = await res.json();
-      if (session !== likedSongsLoadSession) return;
-      url = data.next;
-      nextTracksUrl = data.next;
-      const newTracks = data.items.map(i => i.track).filter(Boolean);
-      selectedPlaylist.tracks.push(...newTracks);
-      renderTrackList(newTracks, true);
-    } catch (err) {
-      console.error("Background liked songs load failed:", err);
-      return;
-    }
-  }
 }
 
 // Infinite Scroll Listener — attached to the actual scrollable list
