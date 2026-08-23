@@ -590,10 +590,13 @@ h1 {
 }
 
 .track-info img {
-  /* Fill available width, keep square, never exceed remaining height */
-  width: min(100%, calc(100% - 2rem));
+  /* Grow to fill leftover vertical space in track-info, staying square and
+     never wider than the container — largest square that fits either way */
+  flex: 1 1 0;
+  min-height: 0;
+  width: auto;
+  max-width: 100%;
   aspect-ratio: 1 / 1;
-  max-height: 70%;
   border-radius: 8px;
   object-fit: cover;
   background: #282828;
@@ -692,7 +695,8 @@ h1 {
 }
 
 .action-btn.liked {
-  color: #2e7bff;
+  color: #ff4b6e;
+  background: rgba(255, 75, 110, 0.15);
 }
 
 /* ============================================================
@@ -1451,4 +1455,418 @@ h1 {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #727272;
+}
+
+/* ============================================================
+   NOW PLAYING MODE — Full-screen Cinematic Overlay
+   (Spotify Car Mode / TV Mode style)
+   ============================================================ */
+
+/* --- Overlay shell --- */
+.np-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  /* Hidden state */
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(1.04);
+  transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.np-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+/* --- Ambient blurred background (album art) --- */
+.np-bg-blur {
+  position: absolute;
+  inset: -30px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(55px) saturate(2.4) brightness(0.72);
+  transform: scale(1.15);
+  transition: background-image 0.8s ease;
+  z-index: 0;
+}
+
+/* Thin gradient scrim — just enough contrast for text */
+.np-bg-gradient {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 80% at 30% 50%, rgba(0,0,0,0.0) 0%, rgba(0,0,0,0.28) 100%),
+    linear-gradient(135deg, rgba(8,8,18,0.32) 0%, rgba(5,5,15,0.48) 100%);
+  z-index: 1;
+}
+
+/* --- Close / compress button (top-right) --- */
+.np-close-btn {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 100;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.7);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+
+.np-close-btn:hover {
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  transform: scale(1.1);
+}
+
+/* --- Two-column layout --- */
+.np-content {
+  position: relative;
+  z-index: 10;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 100%;
+  padding: 0;
+}
+
+/* LEFT column — album art + controls — 58% */
+.np-left {
+  flex: 0 0 60%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.8rem;
+  padding: 3rem 2.5rem 3rem 4rem;
+  height: 100%;
+}
+
+/* Album art + glow wrapper */
+.np-album-wrap {
+  position: relative;
+  width: min(100%, 480px);
+  aspect-ratio: 1;
+  flex-shrink: 0;
+}
+
+.np-album-art {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 16px;
+  box-shadow:
+    0 30px 80px rgba(0,0,0,0.7),
+    0 10px 30px rgba(0,0,0,0.5);
+  display: block;
+  position: relative;
+  z-index: 2;
+  transition: transform 0.35s ease;
+}
+
+.np-overlay.active .np-album-art {
+  animation: np-art-float 6s ease-in-out infinite alternate;
+}
+
+@keyframes np-art-float {
+  from { transform: translateY(0px); }
+  to   { transform: translateY(-8px); }
+}
+
+/* Glowing halo behind the art */
+.np-album-glow {
+  position: absolute;
+  inset: 10%;
+  border-radius: 50%;
+  filter: blur(50px);
+  opacity: 0.5;
+  z-index: 1;
+  background: #2e7bff; /* overridden by JS with dominant color */
+  transition: background 1s ease, opacity 0.5s ease;
+}
+
+/* Track name + artist */
+.np-track-info {
+  text-align: center;
+  width: 100%;
+  max-width: 360px;
+}
+
+.np-track-info h2 {
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.5px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 0.35rem;
+}
+
+.np-track-info p {
+  font-size: clamp(0.85rem, 1.5vw, 1rem);
+  color: rgba(255,255,255,0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Progress bar */
+.np-progress-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 380px;
+}
+
+.np-progress-area span {
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.5);
+  min-width: 36px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+#npProgressBar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.2);
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  transition: height 0.15s ease;
+}
+
+.np-progress-area:hover #npProgressBar {
+  height: 6px;
+}
+
+#npProgressBar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 0;
+  height: 0;
+  background: #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: width 0.15s ease, height 0.15s ease;
+}
+
+.np-progress-area:hover #npProgressBar::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+/* Controls row */
+.np-controls {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+}
+
+.np-ctrl-btn {
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+
+.np-ctrl-primary {
+  width: 68px;
+  height: 68px;
+  font-size: 1.4rem;
+  background: #fff;
+  color: #000;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.np-ctrl-primary:hover {
+  transform: scale(1.08);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+}
+
+.np-ctrl-primary:active {
+  transform: scale(0.94);
+}
+
+.np-ctrl-secondary {
+  width: 46px;
+  height: 46px;
+  font-size: 1.1rem;
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.75);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.np-ctrl-secondary:hover {
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  transform: scale(1.1);
+}
+
+.np-ctrl-secondary:active {
+  transform: scale(0.9);
+}
+
+#npShuffleBtn.np-shuffle-active {
+  color: #2e7bff;
+  background: rgba(46, 123, 255, 0.15);
+  border-color: rgba(46,123,255,0.35);
+}
+
+#npLikeBtn.np-liked {
+  color: #ff4b6e;
+  background: rgba(255, 75, 110, 0.15);
+  border-color: rgba(255, 75, 110, 0.35);
+}
+
+/* RIGHT column — lyrics — fills rest */
+.np-right {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 3rem 4rem 3rem 2rem;
+  gap: 1rem;
+  /* subtle separator */
+  border-left: 1px solid rgba(255,255,255,0.07);
+}
+
+.np-lyrics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.np-lyrics-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: rgba(255,255,255,0.35);
+}
+
+.np-jump-btn {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.5);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 500px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  font-family: inherit;
+}
+
+.np-jump-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  border-color: rgba(255,255,255,0.4);
+}
+
+.np-lyrics-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 8%, black 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 8%, black 88%, transparent 100%);
+  padding: 2rem 0;
+}
+
+.np-lyrics-container::-webkit-scrollbar {
+  display: none;
+}
+
+/* Lyrics lines */
+.np-lyrics-line {
+  font-size: clamp(0.95rem, 1.6vw, 1.35rem);
+  font-weight: 700;
+  line-height: 1.55;
+  color: rgba(255,255,255,0.2);
+  padding: 0.1rem 0;
+  cursor: default;
+  transition: color 0.35s ease, font-size 0.25s ease, opacity 0.35s ease;
+  letter-spacing: -0.2px;
+}
+
+.np-lyrics-line.np-active {
+  color: #fff;
+  font-size: clamp(1.1rem, 1.9vw, 1.6rem);
+  text-shadow: 0 0 40px rgba(255,255,255,0.25);
+}
+
+/* Lines near active — semi-bright */
+.np-lyrics-line.np-near {
+  color: rgba(255,255,255,0.5);
+}
+
+.np-lyrics-placeholder {
+  font-size: 1.1rem;
+  color: rgba(255,255,255,0.2);
+  font-style: italic;
+  padding: 2rem 0;
+}
+
+/* "Now Playing Mode" button on main card — glows when active */
+#nowPlayingModeBtn.np-mode-active {
+  color: #2e7bff;
+  box-shadow: 0 0 8px rgba(46,123,255,0.4);
+}
+
+/* ============================================================
+   RESPONSIVE — stack vertically on narrow screens
+   ============================================================ */
+@media (max-width: 900px) {
+  .np-content {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .np-left {
+    flex: 0 0 auto;
+    padding: 2rem 2rem 1rem;
+    width: 100%;
+  }
+
+  .np-album-wrap {
+    width: min(80vw, 280px);
+  }
+
+  .np-right {
+    flex: 0 0 auto;
+    border-left: none;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    padding: 1.5rem 2rem 2rem;
+    width: 100%;
+    height: 50vh;
+  }
 }

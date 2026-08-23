@@ -86,7 +86,7 @@
                     </div>
                     <div class="now-playing-actions" id="nowPlayingActions">
                       <button id="likeCurrentBtn" class="action-btn" title="Add to Liked Songs"><i
-                          class="fas fa-heart"></i></button>
+                          class="far fa-heart"></i></button>
                       <button id="moreCurrentBtn" class="action-btn" title="More options"><i
                           class="fas fa-ellipsis-h"></i></button>
                     </div>
@@ -115,6 +115,8 @@
                   <div class="controls-right">
                     <button id="lyricsBtn" class="control-btn control-btn--secondary" title="Lyrics"><i
                         class="fas fa-microphone-alt"></i></button>
+                    <button id="nowPlayingModeBtn" class="control-btn control-btn--secondary" title="Now Playing Mode"><i
+                        class="fas fa-expand"></i></button>
                   </div>
                 </div>
               </div>
@@ -208,6 +210,75 @@
   </div>
 
   <div id="toastMsg" class="toast"></div>
+
+  <!-- NOW PLAYING MODE OVERLAY -->
+  <div id="nowPlayingOverlay" class="np-overlay">
+    <!-- Blurred ambient background -->
+    <div class="np-bg-blur" id="npBgBlur"></div>
+    <div class="np-bg-gradient"></div>
+
+    <!-- Close button -->
+    <button id="npCloseBtn" class="np-close-btn" title="Exit Now Playing Mode">
+      <i class="fas fa-compress"></i>
+    </button>
+
+    <!-- Main content -->
+    <div class="np-content">
+
+      <!-- LEFT: Album art + controls -->
+      <div class="np-left">
+        <div class="np-album-wrap">
+          <img id="npTrackImage" class="np-album-art" src="" alt="Album Art">
+          <div class="np-album-glow" id="npAlbumGlow"></div>
+        </div>
+
+        <div class="np-track-info">
+          <h2 id="npTrackName">No song playing</h2>
+          <p id="npTrackArtist"></p>
+        </div>
+
+        <div class="np-progress-area">
+          <span id="npCurrentTime">0:00</span>
+          <input type="range" id="npProgressBar" min="0" max="100" value="0">
+          <span id="npTotalDuration">0:00</span>
+        </div>
+
+        <div class="np-controls">
+          <button id="npShuffleBtn" class="np-ctrl-btn np-ctrl-secondary" title="Shuffle">
+            <i class="fas fa-random"></i>
+          </button>
+          <button id="npPrevBtn" class="np-ctrl-btn np-ctrl-secondary" title="Previous">
+            <i class="fas fa-backward"></i>
+          </button>
+          <button id="npPlayPauseBtn" class="np-ctrl-btn np-ctrl-primary" title="Play/Pause">
+            <i class="fas fa-play"></i>
+          </button>
+          <button id="npNextBtn" class="np-ctrl-btn np-ctrl-secondary" title="Next">
+            <i class="fas fa-forward"></i>
+          </button>
+          <button id="npLikeBtn" class="np-ctrl-btn np-ctrl-secondary" title="Add to Liked Songs">
+            <i class="far fa-heart"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- RIGHT: Lyrics panel -->
+      <div class="np-right">
+        <div class="np-lyrics-header">
+          <span class="np-lyrics-label">Lyrics</span>
+          <div class="np-lyrics-actions">
+            <button id="npJumpBtn" class="np-jump-btn" title="Jump to current line" hidden>
+              <i class="fas fa-crosshairs"></i> Current
+            </button>
+          </div>
+        </div>
+        <div id="npLyricsContainer" class="np-lyrics-container">
+          <p class="np-lyrics-placeholder">Play a song to see lyrics.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
 </body>
 
 </html>

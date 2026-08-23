@@ -26,6 +26,14 @@ let cachedPlaylists = [];
 // preserves the remainder of the queue instead of starting a single-song context
 let cachedQueueUris = [];
 
+// NOW PLAYING MODE state (declared early so overlay hooks in updateCurrentTrackInfo can reference them)
+let isNowPlayingMode = false;
+let npUserScrolled = false;
+let npIsProgrammaticScroll = false;
+let npParsedLyrics = [];
+let npIsPlainLyrics = false;
+let npLyricsTrackUri = null;
+
 window.addEventListener("unhandledrejection", (event) => {
   console.error("Unhandled promise rejection:", event.reason);
   event.preventDefault();
@@ -579,6 +587,8 @@ function updatePlayPauseButton(state) {
   playPauseBtn.querySelector("i").className = state
     ? "fas fa-pause"
     : "fas fa-play";
+  // Keep overlay in sync
+  if (typeof npSyncPlayPause === "function") npSyncPlayPause(state);
 }
 
 // Keep the OS media widget (system tray / lock screen) in sync
@@ -603,6 +613,8 @@ function setShuffleUI(state) {
   isShuffle = state;
   const btn = document.getElementById("shuffleBtn");
   btn.classList.toggle("shuffle-active", state);
+  // Keep overlay in sync
+  if (typeof npSyncShuffle === "function") npSyncShuffle(state);
 }
 
 function updateCurrentTrackInfo(track) {
@@ -637,9 +649,17 @@ function updateCurrentTrackInfo(track) {
   document.getElementById("nowPlayingActions").classList.add("active");
   document.getElementById("shareCurrentBtn").hidden = false;
   const trackId = track.uri.split(":")[2];
-  checkTrackLiked(trackId).then(liked => {
-    document.getElementById("likeCurrentBtn").classList.toggle("liked", liked);
-  });
+  checkTrackLiked(trackId).then(liked => syncLikeButtons(liked));
+
+  // Keep Now Playing overlay in sync
+  if (typeof npSyncTrack === "function") {
+    npSyncTrack(track);
+    // Reset overlay lyrics for the new track
+    npLyricsTrackUri = null;
+    npParsedLyrics = [];
+    npUserScrolled = false;
+    if (isNowPlayingMode && typeof npSyncLyrics === "function") npSyncLyrics();
+  }
 }
 
 // LIKED SONGS
@@ -1102,16 +1122,10 @@ document.getElementById("likeCurrentBtn").addEventListener("click", async (e) =>
   const liked = await checkTrackLiked(trackId);
   if (liked) {
     const res = await fetchWithAuth(`https://api.spotify.com/v1/me/tracks?ids=${trackId}`, { method: "DELETE" });
-    if (res.ok) {
-      document.getElementById("likeCurrentBtn").classList.remove("liked");
-      showToast("Removed from Liked Songs");
-    }
+    if (res.ok) { syncLikeButtons(false); showToast("Removed from Liked Songs"); }
   } else {
     const res = await fetchWithAuth(`https://api.spotify.com/v1/me/tracks?ids=${trackId}`, { method: "PUT", body: JSON.stringify([trackId]) });
-    if (res.ok) {
-      document.getElementById("likeCurrentBtn").classList.add("liked");
-      showToast("Added to Liked Songs");
-    }
+    if (res.ok) { syncLikeButtons(true); showToast("Added to Liked Songs"); }
   }
 });
 
@@ -1249,6 +1263,30 @@ async function checkTrackLiked(trackId) {
   } catch {
     return false;
   }
+}
+
+// Sync BOTH like buttons (main card + NP overlay) to the same liked state.
+function syncLikeButtons(liked) {
+  const mainBtn  = document.getElementById("likeCurrentBtn");
+  const overlayBtn = document.getElementById("npLikeBtn");
+
+  // Icon: outline heart = not liked, solid heart = liked
+  [mainBtn, overlayBtn].forEach(btn => {
+    if (!btn) return;
+    const icon = btn.querySelector("i");
+    if (icon) {
+      icon.className = liked ? "fas fa-heart" : "far fa-heart";
+    }
+  });
+
+  // CSS classes
+  mainBtn?.classList.toggle("liked", liked);
+  overlayBtn?.classList.toggle("np-liked", liked);
+
+  // Tooltip text
+  const label = liked ? "Remove from Liked Songs" : "Add to Liked Songs";
+  if (mainBtn) mainBtn.title = label;
+  if (overlayBtn) overlayBtn.title = label;
 }
 
 function showToast(message) {
@@ -1425,6 +1463,16 @@ function updateProgressUI(position, duration) {
 
   currentTimeEl.textContent = formatTime(position);
   totalDurationEl.textContent = formatTime(duration);
+
+  // Mirror to Now Playing overlay
+  try {
+    if (isNowPlayingMode && typeof npUpdateProgressUI === "function") {
+      npUpdateProgressUI(position, duration);
+      if (typeof npUpdateLyricsHighlight === "function") npUpdateLyricsHighlight(position);
+    }
+  } catch (e) {
+    // never let overlay errors break the main progress/lyrics loop
+  }
 }
 
 function formatTime(ms) {
@@ -1769,7 +1817,7 @@ document.getElementById("ctxNpAddToLiked").addEventListener("click", async (e) =
     { method: "PUT", body: JSON.stringify([trackId]) }
   );
   if (res.ok) {
-    document.getElementById("likeCurrentBtn").classList.add("liked");
+    syncLikeButtons(true);
     showToast("Added to Liked Songs");
   }
   closeContextMenu();
@@ -1784,8 +1832,317 @@ document.getElementById("ctxNpRemoveFromLiked").addEventListener("click", async 
     { method: "DELETE" }
   );
   if (res.ok) {
-    document.getElementById("likeCurrentBtn").classList.remove("liked");
+    syncLikeButtons(false);
     showToast("Removed from Liked Songs");
   }
   closeContextMenu();
 });
+
+// ============================================================
+// NOW PLAYING MODE (Car Mode / Full-screen Widget)
+// ============================================================
+
+// --- Open / close ---
+function openNowPlayingMode() {
+  isNowPlayingMode = true;
+  const overlay = document.getElementById("nowPlayingOverlay");
+  overlay.classList.add("active");
+  document.getElementById("nowPlayingModeBtn").classList.add("np-mode-active");
+
+  // Sync current track data into overlay immediately
+  if (currentTrackObject) {
+    npSyncTrack(currentTrackObject);
+  }
+
+  // Load lyrics into overlay (reuse parsedLyrics if already fetched, else fetch)
+  npSyncLyrics();
+
+  // Sync play/pause state
+  npSyncPlayPause(isPlaying);
+
+  // Sync shuffle
+  npSyncShuffle(isShuffle);
+
+  // Prevent body scroll
+  document.body.style.overflow = "hidden";
+}
+
+function closeNowPlayingMode() {
+  isNowPlayingMode = false;
+  const overlay = document.getElementById("nowPlayingOverlay");
+  overlay.classList.remove("active");
+  document.getElementById("nowPlayingModeBtn").classList.remove("np-mode-active");
+  document.body.style.overflow = "";
+}
+
+document.getElementById("nowPlayingModeBtn").addEventListener("click", () => {
+  if (isNowPlayingMode) {
+    closeNowPlayingMode();
+  } else {
+    openNowPlayingMode();
+  }
+});
+
+document.getElementById("npCloseBtn").addEventListener("click", closeNowPlayingMode);
+
+// Escape key to close
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && isNowPlayingMode) closeNowPlayingMode();
+});
+
+// --- Sync track metadata into overlay ---
+function npSyncTrack(track) {
+  if (!track) return;
+
+  const imgUrl = track.album?.images?.[0]?.url || "";
+  document.getElementById("npTrackImage").src = imgUrl;
+  document.getElementById("npTrackName").textContent = track.name;
+  document.getElementById("npTrackArtist").textContent =
+    track.artists?.map(a => a.name).join(", ") || "";
+
+  // Ambient background = blurred album art
+  const bgBlur = document.getElementById("npBgBlur");
+  bgBlur.style.backgroundImage = imgUrl ? `url(${imgUrl})` : "none";
+
+  // Extract dominant color for the glow halo
+  npExtractDominantColor(imgUrl);
+
+  // Sync like button (both main card + overlay via shared helper)
+  const trackId = track.uri?.split(":")?.[2];
+  if (trackId) {
+    checkTrackLiked(trackId).then(liked => syncLikeButtons(liked));
+  }
+}
+
+// --- Extract dominant color from album art (canvas trick) ---
+function npExtractDominantColor(imgUrl) {
+  if (!imgUrl) return;
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 8;
+      canvas.height = 8;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, 8, 8);
+      const data = ctx.getImageData(0, 0, 8, 8).data;
+      let r = 0, g = 0, b = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        r += data[i]; g += data[i + 1]; b += data[i + 2];
+      }
+      const px = data.length / 4;
+      r = Math.round(r / px);
+      g = Math.round(g / px);
+      b = Math.round(b / px);
+      // Boost saturation — make it more vivid for the glow
+      const color = `rgb(${Math.min(255, r * 1.4)},${Math.min(255, g * 1.4)},${Math.min(255, b * 1.4)})`;
+      document.getElementById("npAlbumGlow").style.background = color;
+    } catch (err) {
+      // Canvas CORS fail — leave default glow
+    }
+  };
+  img.src = imgUrl;
+}
+
+// --- Play / Pause sync ---
+function npSyncPlayPause(playing) {
+  const icon = document.getElementById("npPlayPauseBtn").querySelector("i");
+  icon.className = playing ? "fas fa-pause" : "fas fa-play";
+}
+
+// --- Shuffle sync ---
+function npSyncShuffle(state) {
+  document.getElementById("npShuffleBtn").classList.toggle("np-shuffle-active", state);
+}
+
+// --- Overlay controls ---
+document.getElementById("npPlayPauseBtn").addEventListener("click", () => {
+  document.getElementById("playPauseBtn").click();
+});
+
+document.getElementById("npPrevBtn").addEventListener("click", () => prev());
+document.getElementById("npNextBtn").addEventListener("click", () => next());
+
+document.getElementById("npShuffleBtn").addEventListener("click", () => {
+  document.getElementById("shuffleBtn").click();
+});
+
+document.getElementById("npLikeBtn").addEventListener("click", async () => {
+  document.getElementById("likeCurrentBtn").click();
+  // syncLikeButtons is called inside the main click handler — no extra work needed
+});
+
+// --- Progress bar in overlay ---
+const npProgressBar = document.getElementById("npProgressBar");
+npProgressBar.addEventListener("input", () => {
+  isDraggingProgress = true;
+});
+npProgressBar.addEventListener("change", async (e) => {
+  isDraggingProgress = false;
+  const seekPercent = e.target.value;
+  const state = await player.getCurrentState();
+  if (state) {
+    const seekPos = (seekPercent / 100) * state.duration;
+    player.seek(seekPos);
+    npUpdateProgressUI(seekPos, state.duration);
+  }
+});
+
+function npUpdateProgressUI(position, duration) {
+  const pct = (position / duration) * 100 || 0;
+  npProgressBar.value = pct;
+  npProgressBar.style.background =
+    `linear-gradient(to right, rgba(255,255,255,0.85) ${pct}%, rgba(255,255,255,0.15) ${pct}%)`;
+  document.getElementById("npCurrentTime").textContent = formatTime(position);
+  document.getElementById("npTotalDuration").textContent = formatTime(duration);
+}
+
+// --- Lyrics in overlay ---
+async function npSyncLyrics() {
+  // If overlay lyrics are already for this track, just re-render and scroll
+  if (npLyricsTrackUri === currentTrackUri && npParsedLyrics.length) {
+    npRenderSyncedLyrics();
+    return;
+  }
+  if (npLyricsTrackUri === currentTrackUri && npIsPlainLyrics) {
+    return; // already showing
+  }
+
+  // If the main panel already has lyrics for this track, clone them
+  if (lyricsTrackUri === currentTrackUri && parsedLyrics.length) {
+    npParsedLyrics = parsedLyrics;
+    npIsPlainLyrics = isPlainLyrics;
+    npLyricsTrackUri = currentTrackUri;
+    if (npIsPlainLyrics) {
+      npRenderPlainLyricsFromMain();
+    } else {
+      npRenderSyncedLyrics();
+    }
+    document.getElementById("npJumpBtn").hidden = npIsPlainLyrics;
+    return;
+  }
+
+  // Fetch fresh
+  if (!currentTrackObject) {
+    document.getElementById("npLyricsContainer").innerHTML =
+      '<p class="np-lyrics-placeholder">Play a song to see lyrics.</p>';
+    return;
+  }
+
+  npLyricsTrackUri = currentTrackUri;
+  document.getElementById("npLyricsContainer").innerHTML = loaderHTML();
+  document.getElementById("npJumpBtn").hidden = true;
+
+  const track = currentTrackObject;
+  const artist = encodeURIComponent(track.artists[0]?.name || "");
+  const name = encodeURIComponent(track.name);
+  const album = encodeURIComponent(track.album?.name || "");
+  const duration = Math.round((track.duration_ms || 0) / 1000);
+
+  try {
+    const res = await fetch(
+      `https://lrclib.net/api/get?artist_name=${artist}&track_name=${name}&album_name=${album}&duration=${duration}`
+    );
+    if (!res.ok) throw new Error("not found");
+    const data = await res.json();
+    if (data.syncedLyrics) {
+      npIsPlainLyrics = false;
+      npParsedLyrics = parseLRC(data.syncedLyrics);
+      npRenderSyncedLyrics();
+      document.getElementById("npJumpBtn").hidden = false;
+    } else if (data.plainLyrics) {
+      npIsPlainLyrics = true;
+      npParsedLyrics = [];
+      npRenderPlainLyrics(data.plainLyrics);
+      document.getElementById("npJumpBtn").hidden = true;
+    } else {
+      document.getElementById("npLyricsContainer").innerHTML =
+        '<p class="np-lyrics-placeholder">No lyrics available.</p>';
+    }
+  } catch {
+    document.getElementById("npLyricsContainer").innerHTML =
+      '<p class="np-lyrics-placeholder">Lyrics not found for this track.</p>';
+  }
+}
+
+function npRenderSyncedLyrics() {
+  const container = document.getElementById("npLyricsContainer");
+  container.innerHTML = "";
+  npParsedLyrics.forEach((line, i) => {
+    const p = document.createElement("p");
+    p.className = "np-lyrics-line";
+    p.textContent = line.text;
+    p.dataset.index = i;
+    container.appendChild(p);
+  });
+}
+
+function npRenderPlainLyrics(text) {
+  const container = document.getElementById("npLyricsContainer");
+  container.innerHTML = "";
+  text.split("\n").forEach(line => {
+    const p = document.createElement("p");
+    p.className = "np-lyrics-line";
+    p.textContent = line || " ";
+    container.appendChild(p);
+  });
+}
+
+function npRenderPlainLyricsFromMain() {
+  // Copy DOM children from main lyrics container
+  const src = document.getElementById("lyricsContainer");
+  const dst = document.getElementById("npLyricsContainer");
+  dst.innerHTML = src.innerHTML;
+  // Replace class names to use np- prefix
+  dst.querySelectorAll(".lyrics-line").forEach(el => {
+    el.classList.remove("lyrics-line");
+    el.classList.add("np-lyrics-line");
+  });
+}
+
+// --- Lyric highlighting in overlay ---
+function npUpdateLyricsHighlight(positionMs) {
+  if (!isNowPlayingMode || !npParsedLyrics.length || npIsPlainLyrics) return;
+
+  let activeIdx = 0;
+  for (let i = 0; i < npParsedLyrics.length; i++) {
+    if (npParsedLyrics[i].time <= positionMs) activeIdx = i;
+    else break;
+  }
+
+  const lines = document.querySelectorAll("#npLyricsContainer .np-lyrics-line");
+  lines.forEach((el, i) => {
+    el.classList.toggle("np-active", i === activeIdx);
+    el.classList.toggle("np-near", i === activeIdx - 1 || i === activeIdx + 1);
+  });
+
+  if (!npUserScrolled) npScrollLyricsToActive();
+}
+
+function npScrollLyricsToActive() {
+  const activeLine = document.querySelector("#npLyricsContainer .np-lyrics-line.np-active");
+  if (!activeLine) return;
+
+  const container = document.getElementById("npLyricsContainer");
+  const containerRect = container.getBoundingClientRect();
+  const lineRect = activeLine.getBoundingClientRect();
+  const lineScrollTop = lineRect.top - containerRect.top + container.scrollTop;
+  const target = lineScrollTop - (container.clientHeight / 2) + (activeLine.offsetHeight / 2);
+
+  npIsProgrammaticScroll = true;
+  container.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+  setTimeout(() => { npIsProgrammaticScroll = false; }, 700);
+}
+
+document.getElementById("npLyricsContainer").addEventListener("scroll", () => {
+  if (!npIsProgrammaticScroll) npUserScrolled = true;
+}, { passive: true });
+
+document.getElementById("npJumpBtn").addEventListener("click", () => {
+  npUserScrolled = false;
+  npScrollLyricsToActive();
+});
+
+// (overlay hooks are embedded directly in the original functions above)
+
