@@ -75,8 +75,11 @@ async function login() {
 async function handleCallback(code) {
   const codeVerifier = localStorage.getItem("pkce_code_verifier");
   if (!codeVerifier) {
-    alert("Missing PKCE verifier. Login again.");
-    window.location.href = "/";
+    // Happens when a stale /callback?code=... URL gets re-run (e.g. browser
+    // back button after the flow already completed, or a duplicate load) —
+    // the verifier is already consumed. Log out cleanly instead of alerting.
+    console.warn("Missing PKCE verifier — stale callback, logging out.");
+    forceLogout("missing_pkce_verifier");
     return;
   }
 
@@ -90,8 +93,7 @@ async function handleCallback(code) {
     const data = await res.json();
     if (!res.ok) {
       console.error("Token exchange failed:", data);
-      alert("Token exchange failed. Check console.");
-      window.location.href = "/";
+      forceLogout("token_exchange_failed");
       return;
     }
 
@@ -103,10 +105,24 @@ async function handleCallback(code) {
     window.location.href = "/player/player.html";
   } catch (err) {
     console.error("Callback error:", err);
-    alert("Authentication failed.");
-    window.location.href = "/";
+    forceLogout("callback_error");
   }
 }
+
+// Single, idempotent exit path for every auth failure (missing verifier, failed
+// refresh, expired session, SDK auth errors). Without this, several independent
+// requests failing at once after a long idle period could each fire their own
+// alert()/redirect, stacking blocking dialogs and making the app look stuck.
+let _loggingOut = false;
+
+function forceLogout(reason) {
+  if (_loggingOut) return;
+  _loggingOut = true;
+  if (reason) console.warn("Logging out:", reason);
+  localStorage.clear();
+  window.location.href = "/";
+}
+window.forceLogout = forceLogout;
 
 // Singleton promise to prevent concurrent refresh calls from burning through
 // Spotify's one-time-use (rotated) refresh tokens, which causes a 500
@@ -120,7 +136,10 @@ async function refreshAccessToken() {
   }
 
   const refreshToken = localStorage.getItem("refresh_token");
-  if (!refreshToken) return false;
+  if (!refreshToken) {
+    forceLogout("no_refresh_token");
+    return false;
+  }
 
   _refreshPromise = (async () => {
     try {
@@ -143,16 +162,13 @@ async function refreshAccessToken() {
       }
 
       console.error("Failed to refresh token", data);
-      if (data.spotify_error === "invalid_grant") {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
-        localStorage.removeItem("token_expiry");
-        window.location.href = "/";
-        return false;
-      }
     } catch (err) {
       console.error("Refresh token error:", err);
     }
+    // Any refresh failure (invalid_grant, network error, server error) means
+    // the session can't continue — log out instead of leaving stale tokens
+    // around for the caller to figure out.
+    forceLogout("refresh_failed");
     return false;
   })().finally(() => {
     // Clear the lock so future expiries can trigger a fresh refresh

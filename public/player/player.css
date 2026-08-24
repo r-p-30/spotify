@@ -1559,12 +1559,18 @@ h1 {
   height: 100%;
 }
 
-/* Album art + glow wrapper */
+/* Album art + glow wrapper — grows to fill leftover vertical space in
+   .np-left, staying square and capped at 480px/full width, whichever is
+   smaller. Without this it stayed a fixed 480px regardless of how little
+   vertical room a shorter viewport actually had, so it got clipped by
+   .np-overlay's overflow:hidden instead of shrinking to fit. */
 .np-album-wrap {
   position: relative;
-  width: min(100%, 480px);
+  flex: 1 1 0;
+  min-height: 0;
+  width: auto;
+  max-width: min(100%, 480px);
   aspect-ratio: 1;
-  flex-shrink: 0;
 }
 
 .np-album-art {
@@ -1858,7 +1864,12 @@ h1 {
   }
 
   .np-album-wrap {
+    /* This layout stacks + scrolls instead of filling a fixed height, so go
+       back to a simple fixed size rather than the flex-grow sizing used in
+       the wide/landscape layout above. */
+    flex: 0 0 auto;
     width: min(80vw, 280px);
+    max-width: min(80vw, 280px);
   }
 
   .np-right {

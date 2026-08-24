@@ -6,6 +6,8 @@ let isShuffle = false;
 let hasStartedPlayback = false;
 let isLoadingPlaylist = false;
 let tokenRefreshTimer = null;
+let hasInitializedSession = false; // guards the one-time restore-on-load below
+let reconnectAttempts = 0;
 
 let selectedPlaylist = {
   name: "Liked Songs",
@@ -47,31 +49,28 @@ let token = localStorage.getItem("access_token");
     const hasRefresh = localStorage.getItem("refresh_token");
     if (hasRefresh && window.refreshAccessToken) {
       console.log("No access token, attempting refresh...");
+      // refreshAccessToken() already calls forceLogout() on failure — no need
+      // to duplicate that here (doing so caused stacked alert() dialogs when
+      // more than one thing tried to recover at once).
       const success = await window.refreshAccessToken();
-      if (success) {
-        token = localStorage.getItem("access_token");
-      } else {
-        alert("Session expired. Please login again.");
-        window.location.href = "/";
-      }
+      if (success) token = localStorage.getItem("access_token");
     } else {
-      alert("No access token found. Please login first.");
-      window.location.href = "/";
+      window.forceLogout?.("no_token");
     }
   }
 })().catch(err => {
   console.error("Startup failed:", err);
-  window.location.href = "/";
+  window.forceLogout?.("startup_error");
 });
 
 // LOGOUT
-document.getElementById("logoutBtn")?.addEventListener("click", () => {
+function logout(reason) {
   clearInterval(progressInterval);
   clearInterval(tokenRefreshTimer);
   player?.disconnect();
-  localStorage.clear();
-  window.location.href = "/";
-});
+  window.forceLogout?.(reason);
+}
+document.getElementById("logoutBtn")?.addEventListener("click", () => logout("user_logout"));
 
 // SPOTIFY SDK INIT
 window.onSpotifyWebPlaybackSDKReady = function () {
@@ -84,12 +83,21 @@ window.onSpotifyWebPlaybackSDKReady = function () {
   player.addListener("ready", ({ device_id }) => {
     deviceId = device_id;
     console.log("Spotify Player Ready:", device_id);
+    reconnectAttempts = 0;
 
-    // Restore active session first; loadLikedSongs falls back to default if nothing is playing
-    restorePlaybackSession().then(() => {
-      loadLikedSongs();
-      loadUserPlaylists();
-    });
+    if (!hasInitializedSession) {
+      hasInitializedSession = true;
+      // Restore active session first; loadLikedSongs falls back to default if nothing is playing
+      restorePlaybackSession().then(() => {
+        loadLikedSongs();
+        loadUserPlaylists();
+      });
+    } else {
+      // This is a reconnect after a drop, not the first load — resync the
+      // queue against the live device instead of replaying the old snapshot
+      // on top of whatever's already playing.
+      loadQueueView();
+    }
     syncShuffleState();
     startTokenRefreshTimer();
 
@@ -105,17 +113,29 @@ window.onSpotifyWebPlaybackSDKReady = function () {
   player.addListener("not_ready", ({ device_id }) => {
     console.warn("Player went offline, device:", device_id);
     deviceId = null;
-    setTimeout(() => player.connect(), 1000);
+    // A single one-shot reconnect attempt used to give up silently if it
+    // missed — retry with backoff so a device dropped after a long idle
+    // period (the common case) actually comes back instead of leaving
+    // playback permanently stuck on a dead device.
+    const attemptReconnect = () => {
+      reconnectAttempts++;
+      player.connect().then(success => {
+        if (!success && reconnectAttempts < 10) {
+          setTimeout(attemptReconnect, Math.min(1000 * reconnectAttempts, 10000));
+        }
+      });
+    };
+    setTimeout(attemptReconnect, 1000);
   });
 
   player.addListener("authentication_error", ({ message }) => {
     console.error("SDK auth error:", message);
+    // refreshAccessToken() already calls forceLogout() on failure — nothing
+    // else to do here on the failure path.
     window.refreshAccessToken?.().then(ok => {
       if (ok) {
         token = localStorage.getItem("access_token");
         player.connect();
-      } else {
-        window.location.href = "/";
       }
     });
   });
@@ -1379,22 +1399,35 @@ async function restorePlaybackSession() {
   }
 }
 
+async function checkAndRefreshToken() {
+  const expiry = parseInt(localStorage.getItem("token_expiry") || "0", 10);
+  if (expiry && expiry - Date.now() < 5 * 60 * 1000) {
+    console.log("Token near expiry, refreshing proactively...");
+    // refreshAccessToken() calls forceLogout() itself on failure.
+    if (await window.refreshAccessToken?.()) {
+      token = localStorage.getItem("access_token");
+    }
+  }
+}
+
 function startTokenRefreshTimer() {
   if (tokenRefreshTimer) clearInterval(tokenRefreshTimer);
-  tokenRefreshTimer = setInterval(async () => {
-    const expiry = parseInt(localStorage.getItem("token_expiry") || "0", 10);
-    if (expiry - Date.now() < 5 * 60 * 1000) {
-      console.log("Token near expiry, refreshing proactively...");
-      const ok = await window.refreshAccessToken?.();
-      if (ok) {
-        token = localStorage.getItem("access_token");
-      } else {
-        clearInterval(tokenRefreshTimer);
-        window.location.href = "/";
-      }
-    }
-  }, 4 * 60 * 1000);
+  // This interval alone isn't reliable: browsers throttle/suspend timers in
+  // backgrounded tabs, so after a long idle period it simply never fires
+  // before the token expires. The visibilitychange listener below is the
+  // real safety net for that case — this just covers the tab-stays-open case.
+  tokenRefreshTimer = setInterval(checkAndRefreshToken, 4 * 60 * 1000);
 }
+
+// Backgrounded-tab timers are unreliable, so re-check the token — and resync
+// the queue, in case the device dropped while we were away — the moment the
+// tab becomes visible again instead of waiting for the next throttled tick.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !hasInitializedSession) return;
+  checkAndRefreshToken().then(() => {
+    if (deviceId) loadQueueView();
+  });
+});
 
 async function fetchWithAuth(url, options = {}) {
   options.headers = { ...options.headers, Authorization: "Bearer " + token };
@@ -1402,13 +1435,15 @@ async function fetchWithAuth(url, options = {}) {
 
   if (res.status === 401 && window.refreshAccessToken) {
     console.log("Token expired, attempting refresh...");
+    // refreshAccessToken() calls forceLogout() itself on failure — just
+    // report it here rather than also redirecting (that stacked duplicate
+    // alerts/redirects when several requests 401'd at once).
     if (await window.refreshAccessToken()) {
       token = localStorage.getItem("access_token");
       options.headers.Authorization = "Bearer " + token;
       res = await fetch(url, options);
     } else {
       console.error("Session expired completely");
-      window.location.href = "/";
     }
   }
 
@@ -1563,7 +1598,19 @@ async function loadQueueView() {
     const currentTrack = data.currently_playing
       ? { ...data.currently_playing, _isCurrent: true }
       : null;
-    const upcomingTracks = (data.queue || []).filter(Boolean);
+    let upcomingTracks = (data.queue || []).filter(Boolean);
+
+    // After a device has been idle for a long time, Spotify sometimes drops
+    // the real queue and echoes the current track back for every slot instead
+    // (this is what shows up as the same song repeated in Up Next). Detect
+    // that degenerate response and rebuild Up Next from the playlist we
+    // already have loaded locally rather than trusting it.
+    const isDegenerate = currentTrack && upcomingTracks.length > 0 &&
+      upcomingTracks.every(t => t.uri === currentTrack.uri);
+    if (isDegenerate) {
+      const offset = selectedPlaylist.tracks.findIndex(t => t.uri === currentTrack.uri);
+      upcomingTracks = offset >= 0 ? selectedPlaylist.tracks.slice(offset + 1, offset + 15) : [];
+    }
 
     const items = [
       ...(currentTrack ? [currentTrack] : []),
